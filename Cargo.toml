@@ -1,0 +1,13 @@
+[package]
+name = "fairway"
+version = "0.0.1"
+edition = "2024"
+description = "The path for AI agents (and maybe some humans) to get things done"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/kudato/fairway"
+readme = "README.md"
+keywords = ["ai", "agents", "agent-skills", "git", "cli"]
+categories = ["artificial-intelligence", "command-line-utilities", "development-tools"]
+include = ["src/**", "Cargo.toml", "README.md", "LICENSE-*"]
+
+[dependencies]
