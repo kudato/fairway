@@ -1,0 +1,13 @@
+# Build artifacts
+/target
+**/*.rs.bk
+*.pdb
+
+# Scratch
+.scratch/
+
+# Agent harness: local overrides only, shared config stays tracked
+.claude/settings.local.json
+
+# macOS
+.DS_Store
