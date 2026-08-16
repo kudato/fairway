@@ -40,6 +40,10 @@ impl Git {
     }
 
     /// Whether the working directory is inside a git work tree.
+    /// A repository broken badly enough that git refuses it (say, a
+    /// mangled HEAD) answers exactly like no repository at all and
+    /// reads as `false` — parity with native git, not an oversight;
+    /// telling corruption apart would be a separate integrity check.
     ///
     /// # Errors
     ///

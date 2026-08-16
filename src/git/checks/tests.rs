@@ -116,6 +116,22 @@ mod in_work_tree {
         assert!(matches!(interpret_in_work_tree(out), Ok(false)));
     }
 
+    /// The anchor is the start of a line, not a substring: the
+    /// matching phrase quoted mid-line by some other fatal message
+    /// must not smuggle in the enumerated answer.
+    #[test]
+    fn a_quoted_phrase_mid_line_stays_an_error() {
+        let out = output(
+            128,
+            "",
+            "fatal: cannot change to 'fatal: not a git repository': No such file or directory\n",
+        );
+        assert!(matches!(
+            interpret_in_work_tree(out),
+            Err(GitError::CommandFailed { .. })
+        ));
+    }
+
     #[test]
     fn unrecognized_success_output() {
         let out = output(0, "maybe\n", "");

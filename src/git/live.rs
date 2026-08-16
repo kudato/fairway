@@ -90,9 +90,20 @@ async fn the_git_dir_is_not_a_work_tree() {
     assert!(!inside.in_work_tree().await.unwrap());
 }
 
+/// A repository broken badly enough that git refuses it answers
+/// byte-for-byte like no repository at all; the enumerated `false`
+/// is parity with native git, pinned here as a decision.
+#[tokio::test]
+async fn a_broken_head_reads_as_no_repository() {
+    let (dir, git) = init_repo().await;
+    write(&dir, ".git/HEAD", "garbage\n");
+    assert!(!git.in_work_tree().await.unwrap());
+}
+
 #[tokio::test]
 async fn unborn_repository_answers_every_check() {
     let (_dir, git) = init_repo().await;
+    assert!(git.git_available().await.unwrap());
     assert!(git.in_work_tree().await.unwrap());
     assert!(!git.head_exists().await.unwrap());
     assert!(!git.head_detached().await.unwrap());
@@ -223,6 +234,7 @@ async fn revert_conflict() {
     let revert = git.run(&["revert", "--no-edit", "HEAD~1"]).await.unwrap();
     assert_eq!(revert.status, 1, "revert should conflict: {revert:?}");
     assert!(git.revert_in_progress().await.unwrap());
+    assert!(git.index_conflicted().await.unwrap());
 }
 
 #[tokio::test]
@@ -290,6 +302,28 @@ async fn am_is_not_rebase() {
     assert!(git.rebase_in_progress().await.unwrap());
 }
 
+/// The marker probe follows bash `[ -e ]`: an inaccessible marker
+/// reads as absent, not as an error. Skipped when the permission
+/// bits are not enforced, as they are not under root.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_inaccessible_marker_reads_as_absent() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (dir, git) = init_repo().await;
+    std::fs::create_dir(dir.path().join(".git/rebase-apply")).unwrap();
+    write(&dir, ".git/rebase-apply/applying", "");
+    assert!(git.am_in_progress().await.unwrap());
+
+    let hidden = dir.path().join(".git/rebase-apply");
+    std::fs::set_permissions(&hidden, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let enforced = std::fs::metadata(hidden.join("applying")).is_err();
+    if enforced {
+        assert!(!git.am_in_progress().await.unwrap());
+    }
+    std::fs::set_permissions(&hidden, std::fs::Permissions::from_mode(0o700)).unwrap();
+}
+
 #[tokio::test]
 async fn linked_worktree_markers() {
     let (dir, git) = init_repo().await;
@@ -303,5 +337,21 @@ async fn linked_worktree_markers() {
     write(&dir, ".git/worktrees/linked/CHERRY_PICK_HEAD", "");
     assert!(linked.cherry_pick_in_progress().await.unwrap());
     // The main worktree does not see the linked worktree's state.
+    assert!(!git.cherry_pick_in_progress().await.unwrap());
+}
+
+/// A real conflicting operation in a linked worktree: git leaves
+/// the marker in the per-worktree git dir, where the check must
+/// find it; the main worktree must not see it.
+#[tokio::test]
+async fn linked_worktree_conflict() {
+    let (dir, git) = init_repo().await;
+    conflicting_branches(&dir, &git).await;
+    setup(&git, &["worktree", "add", "-q", "linked", "side"]).await;
+    let linked = Git::hermetic_at(dir.path().join("linked"));
+
+    let pick = linked.run(&["cherry-pick", "main"]).await.unwrap();
+    assert_eq!(pick.status, 1, "cherry-pick should conflict: {pick:?}");
+    assert!(linked.cherry_pick_in_progress().await.unwrap());
     assert!(!git.cherry_pick_in_progress().await.unwrap());
 }
