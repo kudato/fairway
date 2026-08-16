@@ -22,8 +22,11 @@ mod_module_files = "warn"
 
 [dependencies]
 anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+tempfile = "3"
 tokio = { version = "1.26", features = ["rt", "macros", "process", "fs", "signal"] }
+toml = "0.9"
 
 [dev-dependencies]
-tempfile = "3"
 tokio = { version = "1", features = ["time"] }

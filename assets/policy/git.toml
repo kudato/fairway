@@ -1,0 +1,75 @@
+# fairway policy for the git checks: what to do about each fact
+# they measure.
+#
+# A rule fires when the check's answer equals `value`. The prompt is
+# then printed for the agent, and the action decides the exit code:
+# proceed (0, carry on), adjust (1, change course and retry), or
+# stop (2, halt and report to the user).
+#
+# This file is yours: fairway wrote the defaults once and will never
+# overwrite it. Delete it to get these defaults back on the next run.
+
+[git_available]
+value = false
+prompt = "git is not available on this system. Stop and ask the user to install git or fix PATH."
+action = "stop"
+
+[in_work_tree]
+value = false
+prompt = "This directory is not inside a git repository. Stop and confirm the working directory with the user."
+action = "stop"
+
+[head_exists]
+value = false
+prompt = "The repository has no commits yet; the next commit will be the first."
+action = "proceed"
+
+[head_detached]
+value = true
+prompt = "HEAD is detached from any branch, so new commits would be easy to lose. Stop and ask the user how to proceed."
+action = "stop"
+
+[index_has_staged]
+value = false
+prompt = "Nothing is staged. Stage the intended files by explicit path, then retry."
+action = "adjust"
+
+[index_conflicted]
+value = true
+prompt = "The index contains unresolved conflicts. Stop and resolve them with the user before doing anything else."
+action = "stop"
+
+[work_tree_clean]
+value = true
+prompt = "The work tree is clean; there is nothing to commit."
+action = "adjust"
+
+[merge_in_progress]
+value = true
+prompt = "A merge is in progress. Stop; have the user finish or abort it first."
+action = "stop"
+
+[cherry_pick_in_progress]
+value = true
+prompt = "A cherry-pick is in progress. Stop; have the user finish or abort it first."
+action = "stop"
+
+[revert_in_progress]
+value = true
+prompt = "A revert is in progress. Stop; have the user finish or abort it first."
+action = "stop"
+
+[bisect_in_progress]
+value = true
+prompt = "A bisect is in progress. Stop; have the user finish or abort it first."
+action = "stop"
+
+[am_in_progress]
+value = true
+prompt = "A git am is in progress. Stop; have the user finish or abort it first."
+action = "stop"
+
+[rebase_in_progress]
+value = true
+prompt = "A rebase is in progress. Stop; have the user finish or abort it first."
+action = "stop"

@@ -1,0 +1,9 @@
+# fairway settings.
+#
+# This file is yours: fairway wrote the defaults once and will never
+# overwrite it. Delete it to get the defaults back on the next run.
+
+[skills]
+# Where skills are materialized: an absolute path, `~/` for the OS
+# home directory, or a path relative to the fairway home.
+dir = "skills"
