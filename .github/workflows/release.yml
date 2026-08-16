@@ -1,0 +1,77 @@
+# The release process. A release is a version tag on a commit in main;
+# everything after the tag push is machine-checked and machine-executed.
+#
+# To release:
+#   1. Bump `version` in Cargo.toml and run `cargo check` so that
+#      Cargo.lock records the new version.
+#   2. Commit: `chore: bump version to X.Y.Z`.
+#   3. Tag and push: `git tag vX.Y.Z && git push origin main --tags`.
+#
+# The changelog is the release notes GitHub generates from the commits
+# since the previous tag; nothing is written by hand.
+#
+# Publishing uses crates.io Trusted Publishing (OIDC): this repository,
+# this workflow file, and the `release` environment must be registered
+# as a trusted publisher of the crate on crates.io; no token secret is
+# stored.
+#
+# Residual risk: until the repository settings gain a ruleset restricting
+# `v*` tag creation and protection rules on the `release` environment,
+# anyone with write access to the repository can publish by pushing a tag.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: stable
+
+      - name: Tag matches the package version
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${version}"
+            exit 1
+          fi
+
+      - name: Tag is on main
+        run: |
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::Tag ${GITHUB_REF_NAME} points at a commit that is not on main"
+            exit 1
+          fi
+
+      - uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+        id: auth
+
+      - name: Publish to crates.io
+        run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes
