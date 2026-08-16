@@ -11,10 +11,17 @@ use super::{Git, GitError};
 
 /// A fresh repository; the directory is deleted when the handle drops.
 /// The initial branch name is pinned so tests can reference it.
+/// Identity and signing are pinned in the repository configuration:
+/// the commands under test create commits too, and git's fallback of
+/// inventing an identity from the account and hostname fails on
+/// machines without a usable one, such as CI runners.
 async fn init_repo() -> (TempDir, Git) {
     let dir = tempfile::tempdir().unwrap();
     let git = Git::hermetic_at(dir.path());
     setup(&git, &["init", "-q", "-b", "main"]).await;
+    setup(&git, &["config", "user.name", "fairway tests"]).await;
+    setup(&git, &["config", "user.email", "tests@fairway"]).await;
+    setup(&git, &["config", "commit.gpgsign", "false"]).await;
     (dir, git)
 }
 
@@ -24,26 +31,9 @@ async fn setup(git: &Git, args: &[&str]) {
     assert_eq!(out.status, 0, "setup failed: {out:?}");
 }
 
-/// Commit with identity and signing pinned, so the user's global
-/// git configuration cannot break the tests.
+/// Make a setup commit; the identity comes from [`init_repo`].
 async fn commit(git: &Git, message: &str) {
-    setup(
-        git,
-        &[
-            "-c",
-            "user.email=tests@fairway",
-            "-c",
-            "user.name=fairway tests",
-            "-c",
-            "commit.gpgsign=false",
-            "commit",
-            "-q",
-            "--allow-empty",
-            "-m",
-            message,
-        ],
-    )
-    .await;
+    setup(git, &["commit", "-q", "--allow-empty", "-m", message]).await;
 }
 
 fn write(dir: &TempDir, name: &str, content: &str) {
