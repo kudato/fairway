@@ -1,0 +1,18 @@
+# The PyPI packaging of the same binary: maturin compiles the crate
+# and ships it inside a platform wheel, so `pip install fairway` and
+# `uvx fairway` work without a Rust toolchain. Every dynamic field is
+# translated from Cargo.toml — nothing is duplicated here; the
+# [project] table exists only to bundle the license texts into the
+# wheel, which maturin does solely on request.
+
+[build-system]
+requires = ["maturin>=1.14,<2"]
+build-backend = "maturin"
+
+[project]
+name = "fairway"
+dynamic = ["version", "description", "readme", "keywords", "license", "urls"]
+license-files = ["LICENSE-*"]
+
+[tool.maturin]
+bindings = "bin"
