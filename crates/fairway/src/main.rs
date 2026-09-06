@@ -10,7 +10,7 @@ use std::process::ExitCode;
 use anyhow::Context;
 use clap::error::ErrorKind;
 use clap::{CommandFactory, Parser};
-use fairway::verdict::{MALFUNCTION, Verdict};
+use fairway_core::verdict::{MALFUNCTION, Verdict};
 
 /// The instruction to an agent whose invocation could not be
 /// parsed; the parser's diagnostics go to stderr.

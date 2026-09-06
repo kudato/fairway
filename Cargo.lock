@@ -144,6 +144,15 @@ version = "0.0.2"
 dependencies = [
  "anyhow",
  "clap",
+ "fairway-core",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "fairway-core"
+version = "0.0.2"
+dependencies = [
  "serde",
  "tempfile",
  "tokio",

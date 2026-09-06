@@ -2,8 +2,9 @@
 # everything after the tag push is machine-checked and machine-executed.
 #
 # To release:
-#   1. Bump `version` in Cargo.toml and run `cargo check` so that
-#      Cargo.lock records the new version.
+#   1. Bump `version` under [workspace.package] in Cargo.toml, and the
+#      `fairway-core` requirement under [workspace.dependencies] with
+#      it; run `cargo check` so that Cargo.lock records the new version.
 #   2. Commit: `chore: bump version to X.Y.Z`.
 #   3. Tag and push: `git tag vX.Y.Z && git push origin main --tags`.
 #
@@ -12,14 +13,15 @@
 #
 # Publishing uses crates.io Trusted Publishing (OIDC): this repository,
 # this workflow file, and the `release` environment must be registered
-# as a trusted publisher of the crate on crates.io; no token secret is
-# stored. PyPI is published the same way — the binary is packaged into
-# platform wheels by maturin, each wheel is smoke-tested on its own
-# platform before anything is uploaded, and the same registration
-# (repository, workflow file, `release` environment) must exist for
-# the `fairway` project on PyPI. The upload skips files already on the
-# index, so a partially published release is finished by re-running
-# the failed jobs, not by burning a new version.
+# as a trusted publisher of every crate in the workspace on crates.io;
+# no token secret is stored. PyPI is published the same way — the
+# binary is packaged into platform wheels by maturin, each wheel is
+# smoke-tested on its own platform before anything is uploaded, and
+# the same registration (repository, workflow file, `release`
+# environment) must exist for the `fairway` project on PyPI. The
+# upload skips files already on the index, so a partially published
+# release is finished by re-running the failed jobs, not by burning a
+# new version.
 #
 # Residual risk: until the repository settings gain a ruleset restricting
 # `v*` tag creation and protection rules on the `release` environment,
@@ -57,11 +59,13 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Tag matches the package version
+      # One version for the whole workspace: the crates' distinct
+      # versions, joined, must read as exactly the tag.
+      - name: Tag matches the workspace version
         run: |
-          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
-          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
-            echo "::error::Tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${version}"
+          versions="$(cargo metadata --no-deps --format-version 1 | jq -r '[.packages[].version] | unique | join(" ")')"
+          if [ "${GITHUB_REF_NAME}" != "v${versions}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match the crate versions: ${versions}"
             exit 1
           fi
 
@@ -76,7 +80,7 @@ jobs:
         id: auth
 
       - name: Publish to crates.io
-        run: cargo publish --locked
+        run: cargo publish --workspace --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
