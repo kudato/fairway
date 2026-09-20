@@ -1,0 +1,25 @@
+[package]
+name = "fairway-cli"
+description = "Declaring and parsing the commands of the fairway program"
+documentation = "https://docs.rs/fairway-cli"
+readme = "../../README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+linkme.workspace = true
+tokio-util.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+tokio = { workspace = true, features = ["rt", "macros", "net"] }

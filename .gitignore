@@ -2,12 +2,11 @@
 /target
 **/*.rs.bk
 *.pdb
+/site/
+/.venv/
 
 # Scratch
 .scratch/
-
-# Agent harness: local overrides only, shared config stays tracked
-.claude/settings.local.json
 
 # macOS
 .DS_Store

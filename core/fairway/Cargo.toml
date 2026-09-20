@@ -1,0 +1,27 @@
+[package]
+name = "fairway"
+description = "The path for AI agents (and maybe some humans) to get things done"
+readme = "../../README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+fairway-cli.workspace = true
+clap.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "signal", "sync", "time", "macros"] }
+tokio-util.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+pulldown-cmark.workspace = true
+tempfile.workspace = true
+trycmd.workspace = true

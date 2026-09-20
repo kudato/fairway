@@ -1,15 +1,18 @@
-# The workspace: the core library, the binary, and, as they appear,
-# the plugins. Every crate carries the same version; a release
-# publishes them all, the core first.
+# The workspace: the binary and the core libraries it is built on.
+# Every crate carries the same version; a release publishes the
+# libraries before the binary that depends on them.
 
 [workspace]
 resolver = "3"
-members = ["crates/fairway-core", "crates/fairway"]
+members = [
+    "core/fairway",
+    "core/fairway-cli",
+]
 
 [workspace.package]
 version = "0.0.2"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.98.1"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/kudato/fairway"
 keywords = ["ai", "agents", "agent-skills", "git", "cli"]
@@ -19,14 +22,22 @@ categories = ["artificial-intelligence", "command-line-utilities", "development-
 # Pinned exactly: the crates of one release share one version. Bump
 # together with `workspace.package.version`; cargo refuses to build
 # while the two disagree.
-fairway-core = { version = "=0.0.2", path = "crates/fairway-core" }
+fairway-cli = { version = "=0.0.2", path = "core/fairway-cli" }
 
-anyhow = "1"
+# Command declarations and registration.
 clap = { version = "4", features = ["derive"] }
-serde = { version = "1", features = ["derive"] }
-tempfile = "3"
+linkme = "0.3.37"
+
+# Execution and errors.
 tokio = "1.26"
-toml = "0.9"
+tokio-util = "0.7"
+anyhow = "1"
+
+# Tests and documentation examples.
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+pulldown-cmark = { version = "0.13", default-features = false }
+tempfile = "3"
+trycmd = "1.2"
 
 [workspace.lints.rust]
 missing_docs = "warn"
