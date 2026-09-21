@@ -1,0 +1,28 @@
+[package]
+name = "fairway-codec"
+description = "In-memory text and data codecs for Fairway"
+documentation = "https://docs.rs/fairway-codec"
+readme = "../../README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+pulldown-cmark.workspace = true
+rayon.workspace = true
+tokio = { workspace = true, features = ["rt", "sync"] }
+
+[dev-dependencies]
+anyhow.workspace = true
+pulldown-cmark = { workspace = true, features = ["html"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "net", "io-util"] }

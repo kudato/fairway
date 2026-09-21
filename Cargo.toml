@@ -7,6 +7,7 @@ resolver = "3"
 members = [
     "core/fairway",
     "core/fairway-cli",
+    "core/fairway-codec",
 ]
 
 [workspace.package]
@@ -23,6 +24,7 @@ categories = ["artificial-intelligence", "command-line-utilities", "development-
 # together with `workspace.package.version`; cargo refuses to build
 # while the two disagree.
 fairway-cli = { version = "=0.0.2", path = "core/fairway-cli" }
+fairway-codec = { version = "=0.0.2", path = "core/fairway-codec" }
 
 # Command declarations and registration.
 clap = { version = "4", features = ["derive"] }
@@ -32,6 +34,12 @@ linkme = "0.3.37"
 tokio = "1.26"
 tokio-util = "0.7"
 anyhow = "1"
+rayon = "1.12"
+
+# Data formats.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1"
 
 # Tests and documentation examples.
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
