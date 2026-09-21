@@ -98,3 +98,35 @@ fn selected<'a>(
         .find(|(declared, _)| *declared == name)
         .map(|(_, command)| (*command, arguments))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{grouped, tree};
+
+    crate::namespace!(TEXT, "text", "Text commands");
+    crate::namespace!(HELLO, "hello", "Greeting");
+
+    async fn run() -> anyhow::Result<()> {
+        Ok(())
+    }
+    crate::command!(TEXT, "upper", "Uppercase text", run);
+    crate::command!(TEXT, "repeat", "Repeat text", run);
+    crate::command!(HELLO, "Print a greeting", run);
+
+    #[test]
+    fn namespaces_and_subcommands_are_sorted() {
+        let command = tree(clap::Command::new("fairway"), &grouped());
+        let names: Vec<_> = command
+            .get_subcommands()
+            .map(clap::Command::get_name)
+            .collect();
+        assert_eq!(names, ["hello", "text"]);
+
+        let text = command.find_subcommand("text").unwrap();
+        let names: Vec<_> = text
+            .get_subcommands()
+            .map(clap::Command::get_name)
+            .collect();
+        assert_eq!(names, ["repeat", "upper"]);
+    }
+}

@@ -24,9 +24,6 @@ mod macros;
 mod parse;
 mod registry;
 
-#[cfg(test)]
-mod tests;
-
 #[cfg(doctest)]
 #[doc = include_str!("../../../docs/ru/plugin-development/cli.md")]
 mod guide_ru {}

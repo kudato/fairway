@@ -5,11 +5,10 @@ use std::sync::Mutex;
 
 use tokio_util::sync::CancellationToken;
 
-use crate::parse::{grouped, tree};
-use crate::{Cli, PreparedCommand, Shutdown, Threading};
+use fairway_cli::{Cli, PreparedCommand, Shutdown, Threading};
 
-crate::namespace!(CLI, "text", "Text commands");
-crate::namespace!(HELLO, "hello", "Greeting");
+fairway_cli::namespace!(CLI, "text", "Text commands");
+fairway_cli::namespace!(HELLO, "hello", "Greeting");
 
 static OUTPUT: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
@@ -25,7 +24,7 @@ async fn hello() -> anyhow::Result<()> {
     note("hello");
     Ok(())
 }
-crate::command!(HELLO, "Print a greeting", hello);
+fairway_cli::command!(HELLO, "Print a greeting", hello);
 
 #[derive(clap::Args)]
 struct Repeat {
@@ -40,7 +39,7 @@ async fn repeat(args: Repeat) -> anyhow::Result<()> {
     note(args.text.repeat(args.times));
     Ok(())
 }
-crate::command!(CLI, "repeat", "Repeat text", repeat);
+fairway_cli::command!(CLI, "repeat", "Repeat text", repeat);
 
 async fn observe(shutdown: Shutdown) -> anyhow::Result<()> {
     assert!(shutdown.is_requested());
@@ -48,19 +47,19 @@ async fn observe(shutdown: Shutdown) -> anyhow::Result<()> {
     note("observed");
     Ok(())
 }
-crate::command!(CLI, "observe", "Observe shutdown", observe);
+fairway_cli::command!(CLI, "observe", "Observe shutdown", observe);
 
 async fn both(args: Repeat, shutdown: Shutdown) -> anyhow::Result<()> {
     assert!(shutdown.is_requested());
     note(args.text.repeat(args.times));
     Ok(())
 }
-crate::command!(CLI, "both", "Arguments and shutdown", both);
+fairway_cli::command!(CLI, "both", "Arguments and shutdown", both);
 
 async fn fail() -> anyhow::Result<()> {
     anyhow::bail!("command failed");
 }
-crate::command!(CLI, "fail", "Return an error", fail);
+fairway_cli::command!(CLI, "fail", "Return an error", fail);
 
 async fn flavor() -> anyhow::Result<()> {
     let handle = tokio::runtime::Handle::current();
@@ -71,9 +70,9 @@ async fn flavor() -> anyhow::Result<()> {
     ));
     Ok(())
 }
-crate::command!(CLI, "single", "One execution thread", flavor);
-crate::command!(CLI, "fixed", "Two worker threads", flavor, workers = 2);
-crate::command!(CLI, "available", "Available cores", flavor, workers = 0);
+fairway_cli::command!(CLI, "single", "One execution thread", flavor);
+fairway_cli::command!(CLI, "fixed", "Two worker threads", flavor, workers = 2);
+fairway_cli::command!(CLI, "available", "Available cores", flavor, workers = 0);
 
 #[derive(clap::Args)]
 struct Pool {
@@ -84,7 +83,7 @@ struct Pool {
 async fn pool(_: Pool) -> anyhow::Result<()> {
     flavor().await
 }
-crate::command!(
+fairway_cli::command!(
     CLI,
     "pool",
     "Workers from arguments",
@@ -99,7 +98,7 @@ mod sibling {
         super::note("sibling");
         Ok(())
     }
-    crate::command!(ALIAS, "upper", "Registered from another module", upper);
+    fairway_cli::command!(ALIAS, "upper", "Registered from another module", upper);
 }
 
 fn root() -> clap::Command {
@@ -174,31 +173,21 @@ async fn handler_uses_the_callers_runtime_and_returns_its_error() {
 }
 
 #[test]
-fn help_is_sorted_and_uses_declarations_and_field_comments() {
-    let mut command = tree(root(), &grouped());
-    command.clone().debug_assert();
-    let names: Vec<_> = command
-        .get_subcommands()
-        .map(clap::Command::get_name)
-        .collect();
-    assert_eq!(names, ["hello", "text"]);
-    let text = command.find_subcommand("text").unwrap();
-    let names: Vec<_> = text
-        .get_subcommands()
-        .map(clap::Command::get_name)
-        .collect();
-    assert!(names.is_sorted(), "{names:?}");
-    let mut repeat = text.find_subcommand("repeat").unwrap().clone();
-    let help = repeat.render_long_help().to_string();
+fn help_uses_declarations_and_field_comments() {
+    Cli::new(root()).assert_valid();
+    let help = parse(&["fairway", "text", "repeat", "--help"])
+        .err()
+        .expect("expected help")
+        .to_string();
     assert!(help.contains("Repeat text"), "{help}");
     assert!(help.contains("Number of repetitions"), "{help}");
     assert!(help.contains("--times"), "{help}");
     assert!(help.contains("--help"), "{help}");
-    let hello = command.find_subcommand_mut("hello").unwrap();
-    assert_eq!(
-        hello.get_long_about().unwrap().to_string(),
-        "Greeting\n\nPrint a greeting"
-    );
+    let hello = parse(&["fairway", "hello", "--help"])
+        .err()
+        .expect("expected help")
+        .to_string();
+    assert!(hello.contains("Greeting\n\nPrint a greeting"), "{hello}");
 }
 
 #[test]
