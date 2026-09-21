@@ -1,0 +1,36 @@
+[package]
+name = "fairway-fs"
+description = "Asynchronous filesystem operations for Fairway"
+documentation = "https://docs.rs/fairway-fs"
+readme = "../../README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+fairway-codec.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util", "rt", "sync", "time"] }
+tempfile.workspace = true
+sha2.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+xattr.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+unicode-normalization.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_IO", "Win32_Security_Authorization"] }
+
+[dev-dependencies]
+anyhow.workspace = true
+serde.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util", "process"] }

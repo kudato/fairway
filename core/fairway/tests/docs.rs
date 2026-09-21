@@ -39,6 +39,7 @@ fn cli_guides() {
     let fairway = Path::new(env!("CARGO_MANIFEST_DIR"));
     let root = fairway.parent().unwrap().parent().unwrap();
     let cli = root.join("core/fairway-cli");
+    let filesystem = root.join("core/fairway-fs");
     let target = root.join("target/cli-doc-tests");
     fs::create_dir_all(&target).unwrap();
 
@@ -81,6 +82,7 @@ description = "CLI documentation examples"
 
 [dependencies]
 fairway-cli = {{ path = {cli:?} }}
+fairway-fs = {{ path = {filesystem:?} }}
 clap = {{ version = "4", features = ["derive"] }}
 tokio = {{ version = "1.26", features = ["rt", "rt-multi-thread", "signal", "sync", "time", "macros", "net"] }}
 tokio-util = "0.7"

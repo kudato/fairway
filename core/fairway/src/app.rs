@@ -29,6 +29,8 @@ pub(crate) fn run(
         // execution, and runtime teardown, even if any of them blocks.
         let supervisor =
             Supervisor::start(timeout).context("could not watch for termination signals")?;
+        fairway_fs::__private::initialize()
+            .context("could not initialize the Fairway filesystem")?;
         prepare()?;
         let runtime =
             build_runtime(command.threading()).context("could not start the async runtime")?;
