@@ -34,7 +34,12 @@ pub(crate) fn run(
         prepare()?;
         let runtime =
             build_runtime(command.threading()).context("could not start the async runtime")?;
-        let result = runtime.block_on(command.run(supervisor.shutdown().into()));
+        let result = runtime.block_on(async {
+            fairway_config::__private::initialize()
+                .await
+                .context("could not load Fairway configuration")?;
+            command.run(supervisor.shutdown().into()).await
+        });
         drop(runtime);
         drop(supervisor);
         result

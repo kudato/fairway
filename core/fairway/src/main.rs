@@ -27,4 +27,9 @@ mod tests {
     fn cli_registry_is_valid() {
         super::cli().assert_valid();
     }
+
+    #[test]
+    fn config_registry_is_valid() {
+        fairway_config::__private::assert_valid();
+    }
 }

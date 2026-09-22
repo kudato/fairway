@@ -298,8 +298,10 @@ dependencies = [
  "axum",
  "clap",
  "fairway-cli",
+ "fairway-config",
  "fairway-fs",
  "pulldown-cmark",
+ "serde",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -337,6 +339,20 @@ version = "0.0.2"
 dependencies = [
  "rayon",
  "tokio",
+]
+
+[[package]]
+name = "fairway-config"
+version = "0.0.2"
+dependencies = [
+ "fairway-codec",
+ "fairway-compute",
+ "fairway-fs",
+ "linkme",
+ "serde",
+ "tempfile",
+ "tokio",
+ "toml",
 ]
 
 [[package]]

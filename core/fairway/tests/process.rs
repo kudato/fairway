@@ -22,6 +22,20 @@ use fairway_cli::{Cli, Shutdown};
 
 fairway_cli::namespace!(CLI, "probe", "Process tests");
 
+#[derive(Default, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct Settings {
+    value: u64,
+}
+fairway_config::namespace!(SETTINGS: Settings, "probe");
+fairway_config::namespace!(OTHER: Settings, "other");
+
+async fn settings() -> anyhow::Result<()> {
+    println!("SETTINGS:{}:{}", SETTINGS.get().value, OTHER.get().value);
+    Ok(())
+}
+fairway_cli::command!(CLI, "settings", "Loaded settings", settings);
+
 async fn flavor() -> anyhow::Result<()> {
     tokio::spawn(async {
         let handle = tokio::runtime::Handle::current();
@@ -196,11 +210,12 @@ fairway_cli::command!(
     preparation
 );
 
-fn child(argument: &str) -> Command {
+fn child(argument: &str, home: &std::path::Path) -> Command {
     let mut command = Command::new(std::env::current_exe().unwrap());
     command
         .args(["--exact", "child_process", "--nocapture"])
         .env("FAIRWAY_TEST_CHILD", argument)
+        .env("FAIRWAY_HOME", home)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -209,8 +224,9 @@ fn child(argument: &str) -> Command {
 
 #[test]
 fn help_and_usage_errors_use_the_correct_stream_and_exit_code() {
+    let home = tempfile::tempdir().unwrap();
     for (argument, code) in [("--help", 0), ("--version", 0), ("--unknown", 2)] {
-        let output = child(argument).output().unwrap();
+        let output = child(argument, home.path()).output().unwrap();
         assert_eq!(output.status.code(), Some(code), "{output:?}");
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -227,6 +243,7 @@ fn help_and_usage_errors_use_the_correct_stream_and_exit_code() {
 
 #[test]
 fn application_creates_the_requested_runtime() {
+    let home = tempfile::tempdir().unwrap();
     let available = std::thread::available_parallelism().map_or(1, usize::from);
     for (argument, expected) in [
         ("single", "CurrentThread:1".to_owned()),
@@ -235,7 +252,7 @@ fn application_creates_the_requested_runtime() {
         ("pool", "MultiThread:3".to_owned()),
         ("pool --workers 4", "MultiThread:4".to_owned()),
     ] {
-        let output = child(argument).output().unwrap();
+        let output = child(argument, home.path()).output().unwrap();
         assert_eq!(output.status.code(), Some(0), "{output:?}");
         assert!(output.stderr.is_empty(), "{output:?}");
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -245,12 +262,13 @@ fn application_creates_the_requested_runtime() {
 
 #[test]
 fn application_prepares_once_and_reports_errors() {
+    let home = tempfile::tempdir().unwrap();
     for (argument, code, handler_runs, diagnostic) in [
         ("prepared", 0, 1, ""),
         ("preparation-error", 1, 0, "error: preparation failed"),
         ("error", 1, 0, "error: command failed"),
     ] {
-        let output = child(argument).output().unwrap();
+        let output = child(argument, home.path()).output().unwrap();
         assert_eq!(output.status.code(), Some(code), "{output:?}");
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -261,6 +279,41 @@ fn application_prepares_once_and_reports_errors() {
         } else {
             assert!(stderr.contains(diagnostic), "{stderr}");
         }
+    }
+}
+
+#[test]
+fn configuration_precedes_handlers_and_errors_leave_help_available() {
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(home.path().join("conf.d/nested")).unwrap();
+    std::fs::write(home.path().join("config.toml"), "[probe]\nvalue = 1\n").unwrap();
+    std::fs::write(
+        home.path().join("conf.d/nested/probe.toml"),
+        "[probe]\nvalue = 2\n",
+    )
+    .unwrap();
+    let output = child("settings", home.path()).output().unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("SETTINGS:2:0"));
+
+    // Even an unused namespace must be valid before the selected handler runs.
+    std::fs::write(
+        home.path().join("conf.d/other.toml"),
+        "[other]\nvalue = 'invalid'\n",
+    )
+    .unwrap();
+    let output = child("settings", home.path()).output().unwrap();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("SETTINGS:"));
+    let diagnostic = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        diagnostic.contains("other.toml") && diagnostic.contains("other"),
+        "{diagnostic}"
+    );
+    for (argument, code) in [("--help", 0), ("--version", 0), ("--unknown", 2)] {
+        let output = child(argument, home.path()).output().unwrap();
+        assert_eq!(output.status.code(), Some(code), "{output:?}");
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("other.toml"));
     }
 }
 
@@ -280,7 +333,8 @@ impl Drop for Running {
 
 #[cfg(unix)]
 fn signalled(argument: &str, signal: &str) -> (Output, Duration, String) {
-    let mut running = Running(Some(child(argument).spawn().unwrap()));
+    let home = tempfile::tempdir().unwrap();
+    let mut running = Running(Some(child(argument, home.path()).spawn().unwrap()));
     let child = running.0.as_mut().unwrap();
     let stdout = child.stdout.take().unwrap();
     let (ready_tx, ready_rx) = mpsc::channel();

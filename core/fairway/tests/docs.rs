@@ -40,6 +40,7 @@ fn cli_guides() {
     let root = fairway.parent().unwrap().parent().unwrap();
     let cli = root.join("core/fairway-cli");
     let filesystem = root.join("core/fairway-fs");
+    let config = root.join("core/fairway-config");
     let target = root.join("target/cli-doc-tests");
     fs::create_dir_all(&target).unwrap();
 
@@ -83,6 +84,7 @@ description = "CLI documentation examples"
 [dependencies]
 fairway-cli = {{ path = {cli:?} }}
 fairway-fs = {{ path = {filesystem:?} }}
+fairway-config = {{ path = {config:?} }}
 clap = {{ version = "4", features = ["derive"] }}
 tokio = {{ version = "1.26", features = ["rt", "rt-multi-thread", "signal", "sync", "time", "macros", "net"] }}
 tokio-util = "0.7"
@@ -113,6 +115,10 @@ axum = {{ version = "0.8", default-features = false, features = ["http1", "tokio
             .join("debug")
             .join(format!("fairway-cli-docs{}", std::env::consts::EXE_SUFFIX));
         trycmd::TestCases::new()
+            .env(
+                "FAIRWAY_HOME",
+                directory.path().join("home").to_string_lossy(),
+            )
             .register_bin("fairway", binary)
             .timeout(Duration::from_secs(10))
             .case(&guide)

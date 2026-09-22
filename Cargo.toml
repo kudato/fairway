@@ -8,6 +8,7 @@ members = [
     "core/fairway",
     "core/fairway-cli",
     "core/fairway-compute",
+    "core/fairway-config",
     "core/fairway-codec",
     "core/fairway-fs",
 ]
@@ -27,6 +28,7 @@ categories = ["artificial-intelligence", "command-line-utilities", "development-
 # while the two disagree.
 fairway-cli = { version = "=0.0.2", path = "core/fairway-cli" }
 fairway-compute = { version = "=0.0.2", path = "core/fairway-compute" }
+fairway-config = { version = "=0.0.2", path = "core/fairway-config" }
 fairway-codec = { version = "=0.0.2", path = "core/fairway-codec" }
 fairway-fs = { version = "=0.0.2", path = "core/fairway-fs" }
 

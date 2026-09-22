@@ -15,6 +15,7 @@ impl Fixture {
         let core = fairway.parent().unwrap();
         let cli = core.join("fairway-cli");
         let filesystem = core.join("fairway-fs");
+        let config = core.join("fairway-config");
         let target = core.parent().unwrap().join("target");
         fs::create_dir_all(&target).unwrap();
         let fixture = Self {
@@ -31,6 +32,8 @@ resolver = "3"
 
 [workspace.dependencies]
 fw = {{ package = "fairway-cli", path = {cli:?} }}
+cfg = {{ package = "fairway-config", path = {config:?} }}
+serde = {{ version = "1", features = ["derive"] }}
 clap = {{ version = "4", features = ["derive"] }}
 anyhow = "1"
 
@@ -51,6 +54,8 @@ edition = "2024"
 
 [dependencies]
 fw.workspace = true
+cfg.workspace = true
+serde.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 "#
@@ -69,6 +74,7 @@ edition = "2024"
 [dependencies]
 fairway-cli = {{ path = {cli:?} }}
 fairway-fs = {{ path = {filesystem:?} }}
+fairway-config = {{ path = {config:?} }}
 clap.workspace = true
 anyhow.workspace = true
 tokio = {{ version = "1.26", features = ["rt", "rt-multi-thread", "signal", "sync", "time", "macros"] }}
@@ -126,9 +132,13 @@ plugin-b = {{ path = "../plugin-b" }}
     }
 
     fn check(&self, release: bool) -> Output {
+        self.check_registry(release, "cli_registry_is_valid")
+    }
+
+    fn check_registry(&self, release: bool, test: &str) -> Output {
         let output = self
             .cargo("test", release)
-            .args(["--locked", "--bin", "fixture-app", "cli_registry_is_valid"])
+            .args(["--locked", "--bin", "fixture-app", test])
             .output()
             .unwrap();
         assert!(
@@ -145,6 +155,7 @@ plugin-b = {{ path = "../plugin-b" }}
                 .join(format!("fixture-app{}", std::env::consts::EXE_SUFFIX)),
         )
         .args(args)
+        .env("FAIRWAY_HOME", self.directory.path().join("home"))
         .output()
         .unwrap()
     }
@@ -364,5 +375,81 @@ fw::command!(OTHER, "run", "Same command name in another namespace", run);
             "{diagnostic}"
         );
         rejected(output, "namespace \"shared\" is declared twice");
+    }
+
+    // Configuration uses the same application-level check, with a renamed
+    // dependency and two namespaces of one settings type in a real plugin.
+    let config_a = r#"#![deny(warnings)]
+use serde::Deserialize;
+#[derive(Default, Deserialize)]
+struct Settings {}
+cfg::namespace!(FIRST: Settings, "first");
+cfg::namespace!(SECOND: Settings, "second");
+cfg::namespace!(UNICODE: Settings, "настройки.猫.🌍");
+"#;
+    let config_b = r#"#![deny(warnings)]
+#[derive(Default, serde::Deserialize)]
+struct Settings {}
+cfg::namespace!(THIRD: Settings, "third");
+"#;
+    fixture.write("plugin-a/src/lib.rs", config_a);
+    fixture.write("plugin-b/src/lib.rs", config_b);
+    for release in [false, true] {
+        successful(fixture.build(release));
+        successful(fixture.check_registry(release, "config_registry_is_valid"));
+    }
+    for (source, diagnostic) in [
+        (
+            "#[derive(Default)] struct Settings; cfg::namespace!(CONFIG: Settings, \"config\");",
+            "Deserialize",
+        ),
+        (
+            "#[derive(serde::Deserialize)] struct Settings {} cfg::namespace!(CONFIG: Settings, \"config\");",
+            "Default",
+        ),
+        (
+            "#[derive(Default, serde::Deserialize)] struct Settings {} cfg::namespace!(CONFIG: Settings, \"\");",
+            "cannot be empty",
+        ),
+        (
+            "#[derive(Default, serde::Deserialize)] struct Settings {} cfg::namespace!(CONFIG: Settings, \"two words\");",
+            "cannot contain whitespace",
+        ),
+        (
+            "#[derive(Default, serde::Deserialize)] struct Settings {} cfg::namespace!(CONFIG: Settings, \"two\\u{3000}words\");",
+            "cannot contain whitespace",
+        ),
+        (
+            "#[derive(Default, serde::Deserialize)] struct Settings {} cfg::namespace!(CONFIG: Settings, \"two\\u{85}words\");",
+            "cannot contain whitespace",
+        ),
+        (
+            "#[derive(Default, serde::Deserialize)] struct Settings { marker: std::marker::PhantomData<std::rc::Rc<()>> } cfg::namespace!(CONFIG: Settings, \"config\");",
+            "Send",
+        ),
+    ] {
+        fixture.write("plugin-b/src/lib.rs", source);
+        rejected(fixture.build(false), diagnostic);
+    }
+    fixture.write(
+        "plugin-b/src/lib.rs",
+        &config_b.replace("\"third\"", "\"first\""),
+    );
+    for release in [false, true] {
+        successful(fixture.build(release));
+        let output = fixture.check_registry(release, "config_registry_is_valid");
+        let diagnostic = String::from_utf8_lossy(&output.stdout).replace('\\', "/");
+        assert!(
+            diagnostic.contains("plugin_a (plugin-a/src/lib.rs:5)"),
+            "{diagnostic}"
+        );
+        assert!(
+            diagnostic.contains("plugin_b (plugin-b/src/lib.rs:4)"),
+            "{diagnostic}"
+        );
+        rejected(
+            output,
+            "configuration namespace \"first\" is declared twice",
+        );
     }
 }
