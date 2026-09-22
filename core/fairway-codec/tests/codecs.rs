@@ -179,17 +179,64 @@ fn markdown_preserves_commonmark_structure() {
         "\\*literal\\* \\[text\\] &amp; &#35; heading\n",
         "- [ ] no task-list extension\n\n~~no strikethrough~~\n",
         "```\ninside ``` a fence\n```\n",
+        "# Кот 🐈\r\n\r\n[ссылка][id]\r\n\r\n[id]: /путь 'заголовок'\r\n",
+        "",
     ] {
         let markdown = Markdown::decode(input.as_bytes()).unwrap();
         let output = markdown.encode().unwrap();
-        let output = std::str::from_utf8(&output).unwrap();
-        assert_eq!(
-            render(input),
-            render(output),
-            "input: {input:?}\noutput: {output:?}"
-        );
+        assert_eq!(output.as_ref(), input.as_bytes());
+        let mut html = String::new();
+        pulldown_cmark::html::push_html(&mut html, markdown.events());
+        assert_eq!(render(input), html, "input: {input:?}\noutput: {html:?}");
     }
     assert!(Markdown::decode(&[255]).is_err());
+}
+
+#[test]
+fn markdown_traversals_are_independent_and_can_stop_early() {
+    use fairway_codec::markdown::{Event, HeadingLevel, Tag};
+
+    // The definition comes after its use: all traversals must resolve it.
+    let source = "# Heading\n\n[link][id] and *emphasis*\n\n[id]: /target\n";
+    let document = Markdown::parse(source);
+    let mut first = document.events();
+    assert!(matches!(
+        first.next(),
+        Some(Event::Start(Tag::Heading {
+            level: HeadingLevel::H1,
+            ..
+        }))
+    ));
+    let mut html = String::new();
+    pulldown_cmark::html::push_html(&mut html, document.events());
+    assert_eq!(html, render(source));
+    assert_eq!(first.next(), Some(Event::Text("Heading".into())));
+    drop(first);
+
+    let clone = document.clone();
+    drop(document);
+    let mut html = String::new();
+    pulldown_cmark::html::push_html(&mut html, clone.events());
+    assert_eq!(html, render(source));
+    assert_eq!(clone.encode().unwrap().as_ref(), source.as_bytes());
+}
+
+#[test]
+fn markdown_events_can_be_collected_and_owned_explicitly() {
+    let source = "Escaped \\*text\\* &amp; **bold** [link][id]\n\n[id]: /target 'title'\n";
+    let document = Markdown::parse(source);
+    let borrowed: Vec<_> = document.events().collect();
+    let mut html = String::new();
+    pulldown_cmark::html::push_html(&mut html, borrowed.iter().cloned());
+    assert_eq!(html, render(source));
+
+    let owned: Vec<_> = document.events().map(|event| event.into_static()).collect();
+    assert_eq!(borrowed, owned);
+    drop(borrowed);
+    drop(document);
+    let mut html = String::new();
+    pulldown_cmark::html::push_html(&mut html, owned.into_iter());
+    assert_eq!(html, render(source));
 }
 
 #[test]
@@ -206,8 +253,15 @@ fn markdown_encoding_does_not_reinterpret_text_as_structure() {
         "Heading *across\nmultiple lines*\n======\n",
         "Text\n    ---\n",
         "[unknown][reference]\n\n[reference]: /target 'title'\n",
+        "# Кот\r\n\r\n\tКод\r\n\r\n*курсив* и _курсив_  \r\n",
+        "Text without a final newline\0with a NUL",
     ] {
         let document = Markdown::parse(text);
+        assert_eq!(document.encode().unwrap().as_ref(), text.as_bytes());
+        // Traversal may normalize text inside events, but never the source.
+        for event in document.events() {
+            std::hint::black_box(event);
+        }
         assert_eq!(document.encode().unwrap().as_ref(), text.as_bytes());
     }
 }

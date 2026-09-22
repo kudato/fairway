@@ -33,6 +33,46 @@ async fn owned_async_conversions_cover_all_document_types() -> anyhow::Result<()
 }
 
 #[test]
+fn markdown_analysis_runs_in_the_compute_pool_when_decoded_as_a_custom_type() {
+    use fairway_codec::markdown::Event;
+
+    struct Text(Vec<String>);
+
+    impl Decode for Text {
+        type Error = std::str::Utf8Error;
+
+        fn decode(bytes: &[u8]) -> Result<Self, Self::Error> {
+            assert!(
+                std::thread::current()
+                    .name()
+                    .unwrap_or_default()
+                    .starts_with("fairway-codec-")
+            );
+            let document = Markdown::decode(bytes)?;
+            Ok(Self(
+                document
+                    .events()
+                    .filter_map(|event| match event {
+                        Event::Text(text) => Some(text.into_string()),
+                        _ => None,
+                    })
+                    .collect(),
+            ))
+        }
+    }
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let result = runtime
+        .block_on(codec::decode::<Text>(
+            "# Кот\n\n[ссылка][id]\n\n[id]: /path\n",
+        ))
+        .unwrap();
+    assert_eq!(result.0, ["Кот", "ссылка"]);
+}
+
+#[test]
 fn a_busy_codec_does_not_occupy_tokio_workers_or_blocking_io_capacity() {
     struct GatedEncode {
         started: Mutex<Option<oneshot::Sender<()>>>,

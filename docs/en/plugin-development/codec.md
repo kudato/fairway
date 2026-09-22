@@ -72,9 +72,10 @@ async fn add_part(input: String) -> Result<Vec<u8>, codec::Error> {
 
 ### Markdown
 
-`Markdown` contains a parsed document. Its `events` method returns the document's elements:
-text, the start and end of headings, paragraphs, lists, and other constructs.
-`encode` converts the document back to Markdown.
+`Markdown` retains the document's original text. Its `events` method creates an
+iterator over text and the start and end of headings, paragraphs, lists, and
+other constructs. No complete event list is created or cached.
+`encode` returns the original text unchanged, without parsing it.
 
 ```rust
 use fairway_codec::{self as codec, Markdown, markdown::Event};
@@ -90,8 +91,39 @@ async fn inspect_markdown(input: String) -> anyhow::Result<Vec<u8>> {
 }
 ```
 
-Encoding preserves document structure but may change indentation, markers,
-and escaping. Use `String` to preserve the original text.
+Encoding preserves indentation, markers, escaping, and line endings byte for
+byte. Each call to `events()` starts a new parse. The parser allocates its own
+working state: an iterator does not imply constant memory usage.
+
+Constructing and consuming the iterator are synchronous operations on the
+calling thread. `codec::decode::<Markdown>().await` only retains the text after
+validating UTF-8; subsequent traversal does not automatically run in the compute
+pool. For large documents, perform the entire analysis inside a custom type's
+`Decode` implementation and call it through `codec::decode`, as described in
+[Custom types](#custom-types).
+
+Collect events explicitly when needed:
+
+```rust
+use fairway_codec::Markdown;
+
+let document = Markdown::parse("# Heading\n");
+let events: Vec<_> = document.events().collect();
+assert_eq!(events.len(), 3);
+
+// These events can outlive the document.
+let owned: Vec<_> = document.events().map(|event| event.into_static()).collect();
+drop(events);
+drop(document);
+assert_eq!(owned.len(), 3);
+```
+
+This changes the API: `events()` previously returned an `&[Event<'static>]` slice.
+It now returns an iterator yielding `Event<'_>` values that may borrow the
+document's text. Use `.count()` instead of `.len()` to count events, or collect
+a `Vec` explicitly for indexing or reusing already parsed events. Calling
+`.iter()` before traversal is no longer needed. Collecting the complete list
+again requires memory for every event.
 
 ## Streaming
 
@@ -340,8 +372,9 @@ The `into_inner` and `as_ref` methods are also synchronous.
 `Markdown` implements `Decode` and `Encode` for [CommonMark](https://spec.commonmark.org/)
 without extensions. Its synchronous methods are:
 
-- `parse(text: &str) -> Markdown` parses any valid UTF-8 text.
-- `events() -> &[markdown::Event<'static>]` returns the document's elements.
+- `parse(text: &str) -> Markdown` copies UTF-8 text without parsing its structure.
+- `events() -> impl Iterator<Item = markdown::Event<'_>> + '_` starts a new
+  synchronous traversal without caching events.
 
 `codec::markdown` reexports `Event`, `Tag`, `TagEnd`, and related types from
 [pulldown-cmark](https://docs.rs/pulldown-cmark/latest/pulldown_cmark/).

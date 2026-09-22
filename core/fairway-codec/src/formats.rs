@@ -115,27 +115,45 @@ impl<T: Serialize> Encode for Toml<T> {
     }
 }
 
-/// A CommonMark document represented as owned parser events, without extensions.
+/// A CommonMark source document with on-demand events, without extensions.
+///
+/// Only the original text is retained. Encoding preserves it byte for byte;
+/// structural parsing happens when [`Self::events`] is called.
 #[derive(Debug, Clone)]
 pub struct Markdown {
-    events: Vec<pulldown_cmark::Event<'static>>,
     source: String,
 }
 
 impl Markdown {
-    /// Parses any UTF-8 text as CommonMark.
+    /// Copies any UTF-8 text into a document without parsing its structure.
     pub fn parse(text: &str) -> Self {
         Self {
-            events: pulldown_cmark::Parser::new(text)
-                .map(|event| event.into_static())
-                .collect(),
             source: text.to_owned(),
         }
     }
 
-    /// Returns the document's structural events.
-    pub fn events(&self) -> &[pulldown_cmark::Event<'static>] {
-        &self.events
+    /// Creates a fresh iterator over the document's structural events.
+    ///
+    /// Events may borrow the source and are not cached. Each call starts a new
+    /// parse; constructing and consuming the iterator do synchronous work on
+    /// the calling thread. The parser still allocates its own working state.
+    /// For large async workloads, perform the whole traversal inside a custom
+    /// [`Decode`] implementation passed to [`crate::decode`].
+    ///
+    /// Collect explicitly when a reusable list is needed. Convert events with
+    /// [`pulldown_cmark::Event::into_static`] to keep them beyond this document:
+    ///
+    /// ```
+    /// use fairway_codec::Markdown;
+    ///
+    /// let events: Vec<_> = {
+    ///     let document = Markdown::parse("# Heading\n");
+    ///     document.events().map(|event| event.into_static()).collect()
+    /// };
+    /// assert_eq!(events.len(), 3);
+    /// ```
+    pub fn events(&self) -> impl Iterator<Item = pulldown_cmark::Event<'_>> + '_ {
+        pulldown_cmark::Parser::new(&self.source)
     }
 }
 
@@ -151,8 +169,8 @@ impl Encode for Markdown {
     type Error = Error;
 
     fn encode(&self) -> Result<Cow<'_, [u8]>, Self::Error> {
-        // Events are immutable. Reusing their source preserves CommonMark
-        // structure even where event-only serializers lose context/escaping.
+        // Reusing the source preserves formatting and escaping without parsing
+        // or reconstructing the document from structural events.
         Ok(Cow::Borrowed(self.source.as_bytes()))
     }
 }
