@@ -32,6 +32,41 @@ pub(crate) fn copy_metadata(source: &File, target: &File) -> io::Result<()> {
     target.set_permissions(source.metadata()?.permissions())
 }
 
+/// Expands existing 8.3 aliases without following the final symbolic link.
+/// The long leaf must be used for both locking and replacement: renaming onto
+/// an 8.3 spelling can otherwise replace the directory entry's long name.
+pub(crate) fn canonical_target(path: std::path::PathBuf) -> io::Result<std::path::PathBuf> {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use windows_sys::Win32::Storage::FileSystem::GetLongPathNameW;
+    let mut source: Vec<u16> = path.as_os_str().encode_wide().collect();
+    if source.contains(&0) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "path contains a null character",
+        ));
+    }
+    source.push(0);
+    let mut output = vec![0_u16; source.len() + 260];
+    loop {
+        // SAFETY: terminated input and writable output of the specified length.
+        let length =
+            unsafe { GetLongPathNameW(source.as_ptr(), output.as_mut_ptr(), output.len() as u32) };
+        if length == 0 {
+            let error = io::Error::last_os_error();
+            return if error.kind() == io::ErrorKind::NotFound {
+                Ok(path)
+            } else {
+                Err(error)
+            };
+        }
+        if (length as usize) < output.len() {
+            output.truncate(length as usize);
+            return Ok(std::ffi::OsString::from_wide(&output).into());
+        }
+        output.resize(length as usize + 1, 0);
+    }
+}
+
 pub(super) fn lock_key(path: &std::path::Path) -> io::Result<std::path::PathBuf> {
     use std::os::windows::fs::OpenOptionsExt;
     use windows_sys::Win32::Storage::FileSystem::{

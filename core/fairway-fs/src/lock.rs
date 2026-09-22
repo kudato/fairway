@@ -43,7 +43,10 @@ pub(crate) async fn target(path: PathBuf) -> io::Result<PathBuf> {
                 "the target must name a file",
             ));
         }
-        Ok(super::platform::canonical_parent(parent)?.join(name))
+        let target = super::platform::canonical_parent(parent)?.join(name);
+        #[cfg(windows)]
+        let target = super::platform::canonical_target(target)?;
+        Ok(target)
     })
     .await
 }

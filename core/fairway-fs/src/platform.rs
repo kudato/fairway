@@ -38,7 +38,7 @@ mod windows;
 #[cfg(unix)]
 pub(crate) use unix::copy_metadata;
 #[cfg(windows)]
-pub(crate) use windows::copy_metadata;
+pub(crate) use windows::{canonical_target, copy_metadata};
 
 pub(crate) fn check_target(path: &Path, required: bool) -> io::Result<bool> {
     match std::fs::symlink_metadata(path) {
