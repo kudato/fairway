@@ -24,6 +24,14 @@ pub async fn metadata(path: impl AsRef<Path>) -> io::Result<Metadata> {
     tokio::fs::metadata(super::absolute(path.as_ref())?).await
 }
 
+/// Returns an absolute path with symbolic links resolved.
+///
+/// The path must exist. Relative paths use the working directory at the start of the operation.
+pub async fn canonicalize(path: impl AsRef<Path>) -> io::Result<PathBuf> {
+    let path = super::absolute(path.as_ref())?;
+    super::blocking(move || std::fs::canonicalize(path)).await
+}
+
 /// Opens an unsorted, nonrecursive directory traversal, including hidden entries.
 pub async fn ls(path: impl AsRef<Path>) -> io::Result<DirEntries> {
     tokio::fs::read_dir(super::absolute(path.as_ref())?)

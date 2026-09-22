@@ -169,6 +169,7 @@ Each entry provides its name, path, and type. Use `metadata` to obtain
 size and other properties of a file or directory.
 
 `exists` checks whether a file or directory exists at a path.
+`canonicalize` returns an absolute path with symbolic links resolved.
 `home` returns the path to Fairway's application directory.
 
 ```rust
@@ -188,11 +189,12 @@ async fn list_fairway_files() -> io::Result<()> {
         if entry.file_type().await?.is_file() {
             let path = entry.path();
             let metadata = fs::metadata(&path).await?;
+            let resolved = fs::canonicalize(&path).await?;
             println!(
                 "{}: {} bytes ({})",
                 entry.file_name().to_string_lossy(),
                 metadata.len(),
-                path.display()
+                resolved.display()
             );
         }
     }
@@ -233,7 +235,7 @@ async fn temporary_data() -> io::Result<()> {
 Path arguments accept `impl AsRef<Path>`.
 Relative paths are resolved against the working directory at the start of an operation.
 Later changes to the working directory do not affect an operation already in progress.
-`read`, `reader`, `exists`, and `metadata` follow symbolic links.
+`read`, `reader`, `exists`, `metadata`, and `canonicalize` follow symbolic links.
 `Reader`, `Writer`, `Editor`, `DirEntries`, `TempFile`, and `TempDir` implement `Send`.
 
 ### Fairway directory
@@ -441,10 +443,15 @@ Each entry is a `DirEntry` with these methods:
 
 - `exists(path).await -> io::Result<bool>` checks whether a path exists, without creating anything.
 - `metadata(path).await -> io::Result<std::fs::Metadata>` returns file or directory metadata.
+- `canonicalize(path).await -> io::Result<PathBuf>` returns an absolute path
+  with symbolic links resolved.
 
 `exists` returns `false` for a missing path or dangling symbolic link.
 An inability to check, including insufficient permissions, returns an error.
 Metadata reflects the state at the time of the request.
+
+`canonicalize` requires an existing path. A missing path or dangling symbolic link
+returns `NotFound`; other filesystem errors are preserved.
 
 ### Temporary resources
 

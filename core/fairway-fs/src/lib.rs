@@ -20,7 +20,7 @@ use std::{
 
 use fairway_codec::{Decode, Encode};
 
-pub use directories::{DirEntries, DirEntry, exists, ls, metadata, mkdir};
+pub use directories::{DirEntries, DirEntry, canonicalize, exists, ls, metadata, mkdir};
 pub use home::home;
 pub use reader::{Reader, reader};
 pub use temporary::{TempDir, TempFile, temp_dir, temp_file};

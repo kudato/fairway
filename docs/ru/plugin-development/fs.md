@@ -170,6 +170,7 @@ async fn copy_jsonl(source: &Path, target: &Path) -> anyhow::Result<()> {
 или каталога можно получить через `metadata`.
 
 `exists` проверяет, существует ли файл или каталог по указанному пути.
+`canonicalize` возвращает абсолютный путь с раскрытыми символическими ссылками.
 Путь к служебному каталогу Fairway возвращает `home`.
 
 ```rust
@@ -189,11 +190,12 @@ async fn list_fairway_files() -> io::Result<()> {
         if entry.file_type().await?.is_file() {
             let path = entry.path();
             let metadata = fs::metadata(&path).await?;
+            let resolved = fs::canonicalize(&path).await?;
             println!(
                 "{}: {} байт ({})",
                 entry.file_name().to_string_lossy(),
                 metadata.len(),
-                path.display()
+                resolved.display()
             );
         }
     }
@@ -234,7 +236,7 @@ async fn temporary_data() -> io::Result<()> {
 Аргументы пути принимаются как `impl AsRef<Path>`.
 Относительные пути разрешаются относительно рабочего каталога в начале операции.
 Последующее изменение рабочего каталога не влияет на начатую операцию.
-`read`, `reader`, `exists` и `metadata` следуют символическим ссылкам.
+`read`, `reader`, `exists`, `metadata` и `canonicalize` следуют символическим ссылкам.
 `Reader`, `Writer`, `Editor`, `DirEntries`, `TempFile` и `TempDir` реализуют `Send`.
 
 ### Каталог Fairway
@@ -443,10 +445,15 @@ async fn temporary_data() -> io::Result<()> {
 
 - `exists(path).await -> io::Result<bool>` — проверяет наличие пути, ничего не создавая.
 - `metadata(path).await -> io::Result<std::fs::Metadata>` — возвращает метаданные файла или каталога.
+- `canonicalize(path).await -> io::Result<PathBuf>` — возвращает абсолютный путь
+  с раскрытыми символическими ссылками.
 
 `exists` возвращает `false` для отсутствующего пути или битой ссылки.
 Невозможность проверки, в том числе из-за недостатка прав, возвращается как ошибка.
 Метаданные отражают состояние на момент запроса.
+
+Для `canonicalize` путь должен существовать. Отсутствующий путь или битая ссылка
+возвращают `NotFound`; остальные ошибки файловой системы сохраняются.
 
 ### Временные ресурсы
 
