@@ -64,10 +64,52 @@ pub(super) fn lock_key(path: &std::path::Path) -> io::Result<std::path::PathBuf>
         return Ok(path.to_owned());
     }
     let name = path.file_name().expect("normalized target");
-    match name.to_str() {
-        Some(name) => Ok(parent.join(name.to_uppercase())),
-        None => Ok(path.to_owned()),
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use windows_sys::Win32::Globalization::{LCMAP_UPPERCASE, LCMapStringEx};
+    // Windows filesystem casing must preserve UTF-16 (including unpaired
+    // surrogates) and must not expand distinct names such as sharp s into SS.
+    // Invariant, non-linguistic Windows casing provides those semantics.
+    let source: Vec<u16> = name.encode_wide().collect();
+    let length = i32::try_from(source.len())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "file name is too long"))?;
+    let locale = [0_u16]; // LOCALE_NAME_INVARIANT
+    // SAFETY: input and locale are live UTF-16 buffers with explicit lengths.
+    let required = unsafe {
+        LCMapStringEx(
+            locale.as_ptr(),
+            LCMAP_UPPERCASE,
+            source.as_ptr(),
+            length,
+            ptr::null_mut(),
+            0,
+            ptr::null(),
+            ptr::null(),
+            0,
+        )
+    };
+    if required == 0 {
+        return Err(io::Error::last_os_error());
     }
+    let mut mapped = vec![0_u16; required as usize];
+    // SAFETY: output has the capacity returned by the same mapping query.
+    let written = unsafe {
+        LCMapStringEx(
+            locale.as_ptr(),
+            LCMAP_UPPERCASE,
+            source.as_ptr(),
+            length,
+            mapped.as_mut_ptr(),
+            required,
+            ptr::null(),
+            ptr::null(),
+            0,
+        )
+    };
+    if written == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    mapped.truncate(written as usize);
+    Ok(parent.join(std::ffi::OsString::from_wide(&mapped)))
 }
 
 struct Security {
