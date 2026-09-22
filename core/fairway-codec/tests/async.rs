@@ -46,7 +46,7 @@ fn markdown_analysis_runs_in_the_compute_pool_when_decoded_as_a_custom_type() {
                 std::thread::current()
                     .name()
                     .unwrap_or_default()
-                    .starts_with("fairway-codec-")
+                    .starts_with("fairway-compute-")
             );
             let document = Markdown::decode(bytes)?;
             Ok(Self(
@@ -85,7 +85,7 @@ fn a_busy_codec_does_not_occupy_tokio_workers_or_blocking_io_capacity() {
                 std::thread::current()
                     .name()
                     .unwrap()
-                    .starts_with("fairway-codec-")
+                    .starts_with("fairway-compute-")
             );
             self.started
                 .lock()

@@ -1,4 +1,4 @@
-//! Run CLI guide transcripts against Fairway with the plugins from the same Markdown.
+//! Check core guides and run CLI transcripts with the plugins from the same Markdown.
 
 use std::fs;
 use std::path::Path;
@@ -118,4 +118,61 @@ axum = {{ version = "0.8", default-features = false, features = ["http1", "tokio
             .case(&guide)
             .run();
     }
+}
+
+#[test]
+fn compute_guides() {
+    let fairway = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = fairway.parent().unwrap().parent().unwrap();
+    let compute = root.join("core/fairway-compute");
+    let filesystem = root.join("core/fairway-fs");
+    let target = root.join("target/compute-doc-tests");
+    fs::create_dir_all(&target).unwrap();
+    let directory = tempfile::tempdir_in(&target).unwrap();
+    let src = directory.path().join("src");
+    fs::create_dir(&src).unwrap();
+
+    // Examples combining core crates are checked at the application level,
+    // keeping the compute crate independent of its consumers, including in tests.
+    let mut library = String::new();
+    for language in ["ru", "en"] {
+        let guide = root.join(format!("docs/{language}/plugin-development/compute.md"));
+        library.push_str(&format!(
+            "#[doc = include_str!({guide:?})]\nmod guide_{language} {{}}\n"
+        ));
+    }
+    fs::write(src.join("lib.rs"), library).unwrap();
+    fs::write(
+        directory.path().join("Cargo.toml"),
+        format!(
+            r#"
+[workspace]
+
+[package]
+name = "fairway-compute-docs"
+version = "{version}"
+edition = "2024"
+
+[dependencies]
+fairway-compute = {{ path = {compute:?} }}
+fairway-fs = {{ path = {filesystem:?} }}
+rayon = "1.12"
+"#,
+            version = env!("CARGO_PKG_VERSION"),
+        ),
+    )
+    .unwrap();
+    fs::copy(root.join("Cargo.lock"), directory.path().join("Cargo.lock")).unwrap();
+    let output = Command::new(env!("CARGO"))
+        .current_dir(directory.path())
+        .args(["test", "--doc", "--offline", "--quiet", "--target-dir"])
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "could not check compute guides:\n{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
 }

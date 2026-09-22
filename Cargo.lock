@@ -323,12 +323,20 @@ name = "fairway-codec"
 version = "0.0.2"
 dependencies = [
  "anyhow",
+ "fairway-compute",
  "pulldown-cmark",
- "rayon",
  "serde",
  "serde_json",
  "tokio",
  "toml",
+]
+
+[[package]]
+name = "fairway-compute"
+version = "0.0.2"
+dependencies = [
+ "rayon",
+ "tokio",
 ]
 
 [[package]]
@@ -337,6 +345,7 @@ version = "0.0.2"
 dependencies = [
  "anyhow",
  "fairway-codec",
+ "fairway-compute",
  "libc",
  "serde",
  "sha2",

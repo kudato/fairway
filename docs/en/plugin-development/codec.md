@@ -490,7 +490,7 @@ The encoder reuses the existing `Encode` implementation and requires exactly one
 
 The call determines where the conversion runs, regardless of input size:
 
-- `codec::decode` and `codec::encode` submit conversions to a separate compute pool.
+- `codec::decode` and `codec::encode` submit conversions to the shared [fairway-compute](compute.md) pool.
 - `Decode`, `Encode`, `StreamDecode`, and `StreamEncode` methods run on the current thread
   and must not perform I/O.
 
@@ -501,8 +501,9 @@ does not change this limit. Waiting for capacity is asynchronous.
 Conversions submitted to the pool occupy neither Tokio worker threads nor its blocking I/O pool.
 This follows [Tokio's recommendations](https://docs.rs/tokio/latest/tokio/index.html#cpu-bound-tasks-and-blocking-code).
 
-Waiting in the queue can be cancelled. A conversion that has started continues running,
-retaining its input and pool capacity until completion. If the wait was cancelled, its result is discarded.
+Waiting for capacity can be cancelled. A conversion already submitted to the pool
+runs even if it has not started yet, retaining its capacity until completion.
+If the wait was cancelled, its result is discarded.
 
 ### Errors
 

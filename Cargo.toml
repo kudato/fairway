@@ -7,6 +7,7 @@ resolver = "3"
 members = [
     "core/fairway",
     "core/fairway-cli",
+    "core/fairway-compute",
     "core/fairway-codec",
     "core/fairway-fs",
 ]
@@ -25,6 +26,7 @@ categories = ["artificial-intelligence", "command-line-utilities", "development-
 # together with `workspace.package.version`; cargo refuses to build
 # while the two disagree.
 fairway-cli = { version = "=0.0.2", path = "core/fairway-cli" }
+fairway-compute = { version = "=0.0.2", path = "core/fairway-compute" }
 fairway-codec = { version = "=0.0.2", path = "core/fairway-codec" }
 fairway-fs = { version = "=0.0.2", path = "core/fairway-fs" }
 

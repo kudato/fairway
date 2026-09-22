@@ -11,7 +11,6 @@
 //! ```
 
 mod error;
-mod execution;
 mod formats;
 mod jsonl;
 mod stream;
@@ -56,7 +55,7 @@ where
     T: Decode + Send + 'static,
     T::Error: Send + 'static,
 {
-    execution::run(move || T::decode(data.as_ref())).await
+    fairway_compute::run(move || T::decode(data.as_ref())).await
 }
 
 /// Encodes an owned value in the bounded compute pool and returns owned bytes.
@@ -66,16 +65,7 @@ where
     T: Encode + Send + 'static,
     T::Error: Send + 'static,
 {
-    execution::run(move || value.encode().map(Cow::into_owned)).await
-}
-
-/// Shared execution support for Fairway's asynchronous adapters.
-#[doc(hidden)]
-pub mod __private {
-    /// Runs in the same bounded compute pool as `decode` and `encode`.
-    pub async fn compute<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
-        crate::execution::run(work).await
-    }
+    fairway_compute::run(move || value.encode().map(Cow::into_owned)).await
 }
 
 impl Decode for String {

@@ -480,8 +480,8 @@ and passes them to `T::decode(&bytes)`.
 `write`, `Writer::write`, and `Editor::write` accept `V: Encode + Send + 'static`.
 `edit` uses `Decode` when reading and `Encode` when saving the handler's result.
 
-Trait methods are synchronous. `fs` runs them in the compute pool shared with
-`fairway-codec` and awaits their results asynchronously.
+Trait methods are synchronous. `fs` runs them in the [fairway-compute](compute.md)
+pool and awaits their results asynchronously.
 The limit on conversions executing concurrently is shared by `fs` and `codec`.
 
 When used through `fs`, the error types of `Decode` and `Encode` must implement

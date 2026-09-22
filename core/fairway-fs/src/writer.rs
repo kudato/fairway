@@ -226,7 +226,7 @@ impl Writer {
         self.pending = Some(tokio::spawn(async move {
             // Keep the lock with the job across both CPU work and file I/O.
             // Cancelling the caller never releases a still-running operation.
-            let (mut state, bytes) = fairway_codec::__private::compute(move || {
+            let (mut state, bytes) = fairway_compute::run(move || {
                 let bytes = contents
                     .encode()
                     .map(|bytes| bytes.into_owned())
