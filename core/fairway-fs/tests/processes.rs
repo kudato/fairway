@@ -1,4 +1,4 @@
-//! Real OS locks across independent Fairway processes, including crash recovery.
+//! Filesystem startup, blocking behavior, and OS locks across independent processes.
 
 use std::{
     io::{self, BufRead, Write},
@@ -44,6 +44,12 @@ fn child_process() {
                 }
             }
             "initialize" => fs::__private::initialize()?,
+            "reject-non-regular" => {
+                assert_eq!(
+                    fs::read::<Vec<u8>>(&target).await.unwrap_err().kind(),
+                    io::ErrorKind::InvalidInput
+                );
+            }
             "home" => {
                 fs::__private::initialize()?;
                 std::env::set_current_dir(&target)?;
@@ -111,6 +117,34 @@ impl Running {
             .recv_timeout(Duration::from_secs(10))
             .expect("child must acquire the lock");
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn read_rejects_non_regular_files_without_waiting_for_a_writer() -> io::Result<()> {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempfile::tempdir()?;
+    let home = directory.path().join("home");
+    let pipe = directory.path().join("pipe");
+    assert!(Command::new("mkfifo").arg(&pipe).status()?.success());
+    let pipe_link = directory.path().join("pipe-link");
+    symlink(&pipe, &pipe_link)?;
+    let device_link = directory.path().join("device-link");
+    symlink("/dev/null", &device_link)?;
+
+    // The parent can terminate a stuck open even if Tokio's blocking worker cannot stop.
+    for path in [
+        pipe.as_path(),
+        pipe_link.as_path(),
+        Path::new("/dev/null"),
+        device_link.as_path(),
+        directory.path(),
+    ] {
+        let mut process = Running(child("reject-non-regular", path, &home).spawn()?);
+        process.wait();
+    }
+    Ok(())
 }
 
 #[test]

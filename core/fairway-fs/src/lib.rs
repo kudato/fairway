@@ -28,14 +28,36 @@ pub use writer::{Editor, Writer, editor, writer};
 
 type BoxError = Box<dyn Error + Send + Sync + 'static>;
 
-/// Reads a whole file and decodes it as `T`. Decode errors become `InvalidData`.
+/// Reads a whole regular file and decodes it as `T`, following symbolic links.
+/// Opened non-regular files are rejected with `InvalidInput`; decode errors become `InvalidData`.
 pub async fn read<T>(path: impl AsRef<Path>) -> io::Result<T>
 where
     T: Decode + Send + 'static,
     T::Error: Into<BoxError>,
 {
     let path = absolute(path.as_ref())?;
-    let bytes = blocking(move || std::fs::read(path)).await?;
+    let bytes = blocking(move || {
+        use std::io::Read;
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            // Opening a FIFO must not wait for a writer before the type check.
+            options.custom_flags(libc::O_NONBLOCK);
+        }
+        let mut file = options.open(path)?;
+        if !file.metadata()?.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "not a regular file",
+            ));
+        }
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    })
+    .await?;
     fairway_codec::__private::compute(move || T::decode(&bytes).map_err(decode_error)).await
 }
 

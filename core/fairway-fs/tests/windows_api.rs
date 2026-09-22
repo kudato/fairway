@@ -1,3 +1,4 @@
+#![cfg_attr(not(windows), allow(missing_docs))]
 #![cfg(windows)]
 //! Windows path identity and filesystem API contracts.
 use fairway_fs as fs;

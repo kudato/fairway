@@ -247,8 +247,14 @@ If the path cannot be determined, the function returns an error.
 
 ### Reading
 
-- `read::<T>(path).await -> io::Result<T>` reads a whole file and decodes it as `T`.
+- `read::<T>(path).await -> io::Result<T>` reads a whole regular file and decodes it as `T`.
 - `reader(path).await -> io::Result<Reader>` opens a file for sequential reading.
+
+`read` checks the opened object's type before reading. A detected directory,
+named pipe, device, or other special file produces `InvalidInput`.
+Errors from opening the path or reading its metadata retain their original `io::ErrorKind`.
+A symbolic link to a regular file is accepted.
+On Unix, opening a named pipe does not wait for a writer.
 
 `read` supports these result types:
 
