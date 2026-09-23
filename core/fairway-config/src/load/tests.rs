@@ -478,3 +478,38 @@ async fn dangling_selected_links_and_fifos_fail_without_waiting() {
         fs::remove_file(path).unwrap();
     }
 }
+
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_junctions_follow_logical_precedence_and_reject_cycles() {
+    fn junction(target: &Path, link: &Path) {
+        let output = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link.components().collect::<std::path::PathBuf>())
+            .arg(target.components().collect::<std::path::PathBuf>())
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+    }
+    let home = TempDir::new().unwrap();
+    let external = TempDir::new().unwrap();
+    fs::create_dir(home.path().join("conf.d")).unwrap();
+    write(external.path(), "settings.toml", "[settings]\nvalue = 1\n");
+    junction(external.path(), &home.path().join("conf.d/a"));
+    junction(external.path(), &home.path().join("conf.d/c"));
+    write(home.path(), "conf.d/b.toml", "[settings]\nvalue = 2\n");
+    assert_eq!(
+        table(home.path()).await.unwrap()["value"].as_integer(),
+        Some(1)
+    );
+    let back = external.path().join("back");
+    junction(&home.path().join("conf.d"), &back);
+    let result = tokio::time::timeout(std::time::Duration::from_secs(5), table(home.path())).await;
+    // Remove the cycle explicitly before either temporary directory is dropped.
+    fs::remove_dir(&back).unwrap();
+    let error = result
+        .expect("junction cycle must not hang")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("cycle") && error.contains("back"), "{error}");
+}
