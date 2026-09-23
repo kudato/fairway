@@ -1,6 +1,8 @@
 //! CLI assembly, argument parsing, and preparation of the selected handler.
 
+use std::collections::HashMap;
 use std::ffi::OsString;
+use std::sync::OnceLock;
 
 use clap::ArgMatches;
 
@@ -18,13 +20,19 @@ pub(crate) fn parse(
     args: impl IntoIterator<Item = OsString>,
 ) -> Result<PreparedCommand, clap::Error> {
     let groups = grouped();
-    let mut matches = tree(root, &groups).try_get_matches_from(args)?;
-    let (command, mut matches) = selected(&groups, &mut matches)
+    let mut matches = tree(root, groups).try_get_matches_from(args)?;
+    let (command, mut matches) = selected(groups, &mut matches)
         .expect("clap requires a namespace and its handler or a subcommand");
     (command.prepare)(&mut matches)
 }
 
-pub(crate) fn grouped() -> Vec<Group<'static>> {
+pub(crate) fn grouped() -> &'static [Group<'static>] {
+    // Only linked declarations are cached; clap configuration remains per call.
+    static GROUPS: OnceLock<Vec<Group<'static>>> = OnceLock::new();
+    GROUPS.get_or_init(build_groups)
+}
+
+fn build_groups() -> Vec<Group<'static>> {
     let mut groups: Vec<_> = FAIRWAY_CLI_NAMESPACES
         .iter()
         .map(|namespace| Group {
@@ -33,16 +41,23 @@ pub(crate) fn grouped() -> Vec<Group<'static>> {
             named: Vec::new(),
         })
         .collect();
+    // Use declaration identity so duplicate names remain separate registrations.
+    let namespaces: HashMap<_, _> = groups
+        .iter()
+        .enumerate()
+        .map(|(index, group)| (std::ptr::from_ref(group.namespace), index))
+        .collect();
     for command in FAIRWAY_CLI_COMMANDS {
-        let group = groups
-            .iter_mut()
-            .find(|group| std::ptr::eq(group.namespace, command.namespace))
+        let index = namespaces
+            .get(&std::ptr::from_ref(command.namespace))
             .expect("command! uses a namespace declared by namespace!");
+        let group = &mut groups[*index];
         match command.name {
             Some(name) => group.named.push((name, command)),
             None => group.own = Some(command),
         }
     }
+    drop(namespaces);
     groups.sort_unstable_by_key(|group| group.namespace.name);
     for group in &mut groups {
         group.named.sort_unstable_by_key(|(name, _)| *name);
@@ -85,18 +100,18 @@ fn selected<'a>(
     matches: &mut ArgMatches,
 ) -> Option<(&'a Command, ArgMatches)> {
     let (namespace, mut below) = matches.remove_subcommand()?;
-    let group = groups
-        .iter()
-        .find(|group| group.namespace.name == namespace)?;
+    let group = &groups[groups
+        .binary_search_by_key(&namespace.as_str(), |group| group.namespace.name)
+        .ok()?];
     if let Some(own) = group.own {
         return Some((own, below));
     }
     let (name, arguments) = below.remove_subcommand()?;
-    group
+    let index = group
         .named
-        .iter()
-        .find(|(declared, _)| *declared == name)
-        .map(|(_, command)| (*command, arguments))
+        .binary_search_by_key(&name.as_str(), |(declared, _)| *declared)
+        .ok()?;
+    Some((group.named[index].1, arguments))
 }
 
 #[cfg(test)]
@@ -115,7 +130,7 @@ mod tests {
 
     #[test]
     fn namespaces_and_subcommands_are_sorted() {
-        let command = tree(clap::Command::new("fairway"), &grouped());
+        let command = tree(clap::Command::new("fairway"), grouped());
         let names: Vec<_> = command
             .get_subcommands()
             .map(clap::Command::get_name)

@@ -113,7 +113,7 @@ impl Cli {
     /// Registration conflicts include both declaration locations.
     pub fn assert_valid(self) {
         registry::assert_valid();
-        parse::tree(self.root, &parse::grouped()).debug_assert();
+        parse::tree(self.root, parse::grouped()).debug_assert();
     }
 
     /// Parses `args` and prepares the selected command for the application.
