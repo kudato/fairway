@@ -2,7 +2,9 @@ use std::{fmt, marker::PhantomData};
 
 use serde::{Serialize, de::DeserializeOwned};
 
-use crate::{Encode, Error, Json, StreamDecode, StreamEncode, error::json_error};
+use crate::{
+    Encode, Error, Json, StreamDecode, StreamEncode, error::json_error, stream::append_owned,
+};
 
 #[derive(Debug)]
 struct ClosedInput;
@@ -63,8 +65,8 @@ impl<T> Jsonl<T> {
 }
 
 impl<T: DeserializeOwned> Jsonl<T> {
-    /// Supplies bytes, which may end inside a line or UTF-8 character.
-    pub fn push(&mut self, chunk: &[u8]) -> Result<(), Error> {
+    /// Takes ownership of bytes, which may end inside a line or UTF-8 character.
+    pub fn push(&mut self, chunk: Vec<u8>) -> Result<(), Error> {
         if self.finished || self.failed {
             self.fail();
             return Err(Error::Decode {
@@ -79,7 +81,7 @@ impl<T: DeserializeOwned> Jsonl<T> {
             self.scanned -= self.start;
             self.start = 0;
         }
-        self.bytes.extend_from_slice(chunk);
+        append_owned(&mut self.bytes, chunk);
         Ok(())
     }
 
@@ -147,7 +149,7 @@ impl<T: DeserializeOwned> StreamDecode for Jsonl<T> {
     type Item = T;
     type Error = Error;
 
-    fn push(&mut self, bytes: &[u8]) -> Result<(), Error> {
+    fn push(&mut self, bytes: Vec<u8>) -> Result<(), Error> {
         Self::push(self, bytes)
     }
 
@@ -173,7 +175,7 @@ impl<T: Serialize> StreamEncode for Jsonl<T> {
     type Item = T;
     type Error = Error;
 
-    fn encode(&mut self, item: &T, output: &mut Vec<u8>) -> Result<(), Error> {
+    fn encode(&mut self, item: T, output: &mut Vec<u8>) -> Result<(), Error> {
         if self.output_finished || self.output_failed {
             self.output_failed = true;
             return Err(Error::Encode {
@@ -185,7 +187,7 @@ impl<T: Serialize> StreamEncode for Jsonl<T> {
         // Reuse Json's representation, including its single trailing newline.
         match Json(item).encode() {
             Ok(bytes) => {
-                output.extend_from_slice(&bytes);
+                append_owned(output, bytes);
                 Ok(())
             }
             Err(Error::Encode { source, .. }) => {

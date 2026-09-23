@@ -82,10 +82,10 @@ use fairway_fs as fs;
 async fn write_result(target: &Path) -> io::Result<()> {
     let mut output = fs::writer(target).await?;
 
-    output.write("Первая часть\n").await?;
+    output.write("Первая часть\n".to_owned()).await?;
     output.flush().await?;
 
-    output.write("Вторая часть\n").await?;
+    output.write("Вторая часть\n".to_owned()).await?;
     output.finish().await
 }
 ```
@@ -121,7 +121,7 @@ async fn first_hundred_lines(path: &Path) -> io::Result<()> {
             break;
         };
         editor.write(line).await?;
-        editor.write("\n").await?;
+        editor.write("\n".to_owned()).await?;
     }
 
     editor.finish().await
@@ -154,7 +154,7 @@ async fn copy_jsonl(source: &Path, target: &Path) -> anyhow::Result<()> {
     let mut input = fs::reader(source).await?;
     let mut output = fs::writer(target).await?;
     while let Some(line) = input.next_line().await? {
-        let word: Json<String> = codec::decode(line).await?;
+        let word: Json<String> = codec::decode(line.into_bytes()).await?;
         output.write(word).await?;
     }
 
@@ -217,14 +217,14 @@ use fairway_fs as fs;
 
 async fn temporary_data() -> io::Result<()> {
     let file: fs::TempFile = fs::temp_file().await?;
-    fs::write(file.path(), "Временные данные").await?;
+    fs::write(file.path(), "Временные данные".to_owned()).await?;
     let bytes: Vec<u8> = fs::read(file.path()).await?;
     println!("Прочитано {} байт", bytes.len());
 
     let directory: fs::TempDir = fs::temp_dir().await?;
     let data = directory.path().join("data");
     fs::mkdir(&data).await?;
-    fs::write(data.join("input.txt"), "Данные для обработки").await?;
+    fs::write(data.join("input.txt"), "Данные для обработки".to_owned()).await?;
 
     file.close().await?;
     directory.close().await
@@ -305,7 +305,8 @@ async fn temporary_data() -> io::Result<()> {
 Вызывать `flush` после каждой порции не требуется.
 
 Аргумент `contents: V` требует `V: Encode + Send + 'static` и передаётся по значению.
-Для текста и байтов передавайте `String`, `Vec<u8>` или строковый литерал.
+Для текста и байтов передавайте собственный `String`, `Vec<u8>` или массив байтов.
+Строковый литерал преобразуйте явно, например `"текст".to_owned()`.
 Срез локального буфера нужно скопировать в собственный `Vec<u8>`.
 `fs::write` преобразует всё содержимое до записи, а `Writer::write` — переданную часть.
 
@@ -478,7 +479,7 @@ async fn temporary_data() -> io::Result<()> {
 и импортируйте трейты из `fairway_codec`.
 
 `read` требует `T: Decode + Send + 'static`, читает все байты файла
-и передаёт их в `T::decode(&bytes)`.
+и передаёт их в `T::decode(bytes)`.
 `write`, `Writer::write` и `Editor::write` принимают `V: Encode + Send + 'static`.
 `edit` использует `Decode` при чтении и `Encode` при сохранении результата обработчика.
 

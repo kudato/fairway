@@ -13,8 +13,9 @@ pub trait StreamDecode {
     /// A format or decoder-state error.
     type Error;
 
-    /// Accepts a chunk, including one split inside a value or UTF-8 character.
-    fn push(&mut self, bytes: &[u8]) -> Result<(), Self::Error>;
+    /// Consumes a chunk, including one split inside a value or UTF-8 character.
+    /// The decoder may retain the buffer between calls instead of copying it.
+    fn push(&mut self, bytes: Vec<u8>) -> Result<(), Self::Error>;
 
     /// Returns the next available value without waiting for additional input.
     fn next(&mut self) -> Result<Option<Self::Item>, Self::Error>;
@@ -31,12 +32,13 @@ pub trait StreamDecode {
 /// buffer and may drain it between calls. Methods must not perform I/O.
 pub trait StreamEncode {
     /// One value accepted by this format.
-    type Item: ?Sized;
+    type Item;
     /// A format or encoder-state error.
     type Error;
 
-    /// Appends an encoded value to `output`.
-    fn encode(&mut self, item: &Self::Item, output: &mut Vec<u8>) -> Result<(), Self::Error>;
+    /// Consumes a value, including on error, and appends its encoding to `output`.
+    /// An empty output buffer may be replaced with the value's own storage.
+    fn encode(&mut self, item: Self::Item, output: &mut Vec<u8>) -> Result<(), Self::Error>;
 
     /// Appends any format trailer. Does not flush I/O, close a pipe, or save a file.
     /// Repeating a successful `finish` appends nothing. Subsequent `encode` is an error.
@@ -117,7 +119,7 @@ impl<T: Decode> StreamDecode for Decoder<T> {
     type Item = T;
     type Error = StreamError<T::Error>;
 
-    fn push(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
+    fn push(&mut self, bytes: Vec<u8>) -> Result<(), Self::Error> {
         if self.failed {
             return Err(StreamError::Failed);
         }
@@ -125,7 +127,7 @@ impl<T: Decode> StreamDecode for Decoder<T> {
             self.fail();
             return Err(StreamError::Closed);
         }
-        self.bytes.extend_from_slice(bytes);
+        append_owned(&mut self.bytes, bytes);
         Ok(())
     }
 
@@ -135,7 +137,7 @@ impl<T: Decode> StreamDecode for Decoder<T> {
         }
         self.drained = true;
         let bytes = std::mem::take(&mut self.bytes);
-        match T::decode(&bytes) {
+        match T::decode(bytes) {
             Ok(value) => Ok(Some(value)),
             Err(error) => {
                 self.failed = true;
@@ -164,18 +166,18 @@ enum EncodeState {
 ///
 /// Accepts one value. A second value or finishing without a value is an error:
 /// concatenating documents does not generally produce a valid document.
-pub struct Encoder<T: ?Sized> {
+pub struct Encoder<T> {
     state: EncodeState,
-    value: PhantomData<fn(&T)>,
+    value: PhantomData<fn(T)>,
 }
 
-impl<T: ?Sized> Default for Encoder<T> {
+impl<T> Default for Encoder<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: ?Sized> Encoder<T> {
+impl<T> Encoder<T> {
     /// Creates an encoder expecting one document.
     pub fn new() -> Self {
         Self {
@@ -185,11 +187,11 @@ impl<T: ?Sized> Encoder<T> {
     }
 }
 
-impl<T: Encode + ?Sized> StreamEncode for Encoder<T> {
+impl<T: Encode> StreamEncode for Encoder<T> {
     type Item = T;
     type Error = StreamError<T::Error>;
 
-    fn encode(&mut self, item: &T, output: &mut Vec<u8>) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: T, output: &mut Vec<u8>) -> Result<(), Self::Error> {
         match self.state {
             EncodeState::Empty => {}
             EncodeState::Failed => return Err(StreamError::Failed),
@@ -200,7 +202,7 @@ impl<T: Encode + ?Sized> StreamEncode for Encoder<T> {
         }
         match item.encode() {
             Ok(bytes) => {
-                output.extend_from_slice(&bytes);
+                append_owned(output, bytes);
                 self.state = EncodeState::Written;
                 Ok(())
             }
@@ -223,5 +225,18 @@ impl<T: Encode + ?Sized> StreamEncode for Encoder<T> {
                 Ok(())
             }
         }
+    }
+}
+
+// Preserve a nonempty prefix, but adopt the allocation when there is no prefix.
+// Empty chunks must not discard a reserved buffer or any previous input.
+pub(crate) fn append_owned(output: &mut Vec<u8>, bytes: Vec<u8>) {
+    if bytes.is_empty() {
+        return;
+    }
+    if output.is_empty() {
+        *output = bytes;
+    } else {
+        output.extend_from_slice(&bytes);
     }
 }

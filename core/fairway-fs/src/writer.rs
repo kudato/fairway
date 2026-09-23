@@ -227,10 +227,7 @@ impl Writer {
             // Keep the lock with the job across both CPU work and file I/O.
             // Cancelling the caller never releases a still-running operation.
             let (mut state, bytes) = fairway_compute::run(move || {
-                let bytes = contents
-                    .encode()
-                    .map(|bytes| bytes.into_owned())
-                    .map_err(super::encode_error);
+                let bytes = contents.encode().map_err(super::encode_error);
                 (state, bytes)
             })
             .await;
@@ -391,14 +388,14 @@ mod tests {
             let path = directory.path().join("data");
             std::fs::write(&path, "old")?;
             let mut output = writer(&path).await?;
-            output.write("one").await?;
+            output.write("one".to_owned()).await?;
             let release = pending_flush(&mut output, false).await;
             poll_pending(output.flush()).await;
             assert!(!output.poisoned);
             assert_eq!(std::fs::read_to_string(&path)?, "old");
             release.send(()).unwrap();
             if resume == 0 {
-                output.write("two").await?;
+                output.write("two".to_owned()).await?;
             }
             if resume == 1 {
                 output.flush().await?;
@@ -418,12 +415,12 @@ mod tests {
         let path = directory.path().join("data");
         std::fs::write(&path, "old")?;
         let mut output = writer(&path).await?;
-        output.write("one").await?;
+        output.write("one".to_owned()).await?;
         let release = pending_flush(&mut output, false).await;
-        poll_pending(output.write("two")).await;
+        poll_pending(output.write("two".to_owned())).await;
         assert!(output.poisoned);
         release.send(()).unwrap();
-        assert!(output.write("three").await.is_err());
+        assert!(output.write("three".to_owned()).await.is_err());
         assert!(output.finish().await.is_err());
         assert_eq!(std::fs::read_to_string(path)?, "old");
         Ok(())
@@ -434,8 +431,8 @@ mod tests {
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("data");
         let mut output = writer(&path).await?;
-        drop(output.write("not started"));
-        output.write("saved").await?;
+        drop(output.write("not started".to_owned()));
+        output.write("saved".to_owned()).await?;
         output.finish().await?;
         assert_eq!(std::fs::read_to_string(path)?, "saved");
         Ok(())
@@ -447,7 +444,7 @@ mod tests {
         let path = directory.path().join("data");
         std::fs::write(&path, "old")?;
         let mut output = writer(&path).await?;
-        output.write("one").await?;
+        output.write("one".to_owned()).await?;
         let release = pending_flush(&mut output, true).await;
         poll_pending(output.flush()).await;
         release.send(()).unwrap();
@@ -465,7 +462,7 @@ mod tests {
         let state = output.state.as_mut().unwrap();
         let readonly = File::open(state.temp.as_ref().unwrap())?;
         state.output = Some(BufWriter::new(readonly));
-        output.write("cannot flush this").await?;
+        output.write("cannot flush this".to_owned()).await?;
         assert!(output.flush().await.is_err());
         assert!(output.finish().await.is_err());
         assert_eq!(std::fs::read_to_string(path)?, "old");
@@ -479,7 +476,7 @@ mod tests {
         let path = directory.path().join("data");
         std::fs::write(&path, "old")?;
         let mut output = writer(&path).await?;
-        output.write("new").await?;
+        output.write("new".to_owned()).await?;
         let (started, receiver) = oneshot::channel();
         let (release, wait) = mpsc::channel();
         output.state.as_mut().unwrap().commit_gate = Some((started, wait));

@@ -1,7 +1,6 @@
 //! The asynchronous API runs conversion work outside Tokio's execution pools.
 
 use std::{
-    borrow::Cow,
     convert::Infallible,
     sync::{Mutex, mpsc},
 };
@@ -16,19 +15,22 @@ async fn owned_async_conversions_cover_all_document_types() -> anyhow::Result<()
     struct Document {
         name: String,
     }
-    let json: Json<Vec<u8>> = codec::decode("[1, 2]".to_owned()).await?;
+    let json: Json<Vec<u8>> = codec::decode(b"[1, 2]".to_vec()).await?;
     assert_eq!(codec::encode(json).await?, b"[1,2]\n");
     let toml: Toml<Document> = codec::decode(b"name = 'dataset'".to_vec()).await?;
     let bytes = codec::encode(toml).await?;
     let toml: Toml<Document> = codec::decode(bytes).await?;
     assert_eq!(toml.0.name, "dataset");
-    let md: Markdown = codec::decode("# Heading\n\nText.".to_owned()).await?;
+    let md: Markdown = codec::decode(b"# Heading\n\nText.".to_vec()).await?;
     assert_eq!(codec::encode(md).await?, b"# Heading\n\nText.");
-    assert_eq!(codec::decode::<String>("кот").await?, "кот");
-    assert_eq!(codec::decode::<Vec<u8>>([0, 255]).await?, [0, 255]);
-    assert_eq!(codec::encode("кот").await?, "кот".as_bytes());
+    assert_eq!(
+        codec::decode::<String>("кот".as_bytes().to_vec()).await?,
+        "кот"
+    );
+    assert_eq!(codec::decode::<Vec<u8>>(vec![0, 255]).await?, [0, 255]);
+    assert_eq!(codec::encode("кот".to_owned()).await?, "кот".as_bytes());
     assert_eq!(codec::encode(vec![0, 255]).await?, [0, 255]);
-    assert!(codec::decode::<String>([255]).await.is_err());
+    assert!(codec::decode::<String>(vec![255]).await.is_err());
     Ok(())
 }
 
@@ -41,7 +43,7 @@ fn markdown_analysis_runs_in_the_compute_pool_when_decoded_as_a_custom_type() {
     impl Decode for Text {
         type Error = std::str::Utf8Error;
 
-        fn decode(bytes: &[u8]) -> Result<Self, Self::Error> {
+        fn decode(bytes: Vec<u8>) -> Result<Self, Self::Error> {
             assert!(
                 std::thread::current()
                     .name()
@@ -66,7 +68,7 @@ fn markdown_analysis_runs_in_the_compute_pool_when_decoded_as_a_custom_type() {
         .unwrap();
     let result = runtime
         .block_on(codec::decode::<Text>(
-            "# Кот\n\n[ссылка][id]\n\n[id]: /path\n",
+            "# Кот\n\n[ссылка][id]\n\n[id]: /path\n".as_bytes().to_vec(),
         ))
         .unwrap();
     assert_eq!(result.0, ["Кот", "ссылка"]);
@@ -80,7 +82,7 @@ fn a_busy_codec_does_not_occupy_tokio_workers_or_blocking_io_capacity() {
     }
     impl Encode for GatedEncode {
         type Error = Infallible;
-        fn encode(&self) -> Result<Cow<'_, [u8]>, Infallible> {
+        fn encode(self) -> Result<Vec<u8>, Infallible> {
             assert!(
                 std::thread::current()
                     .name()
@@ -95,7 +97,7 @@ fn a_busy_codec_does_not_occupy_tokio_workers_or_blocking_io_capacity() {
                 .send(())
                 .unwrap();
             self.release.lock().unwrap().recv().unwrap();
-            Ok(Cow::Borrowed(b"done"))
+            Ok(b"done".to_vec())
         }
     }
     // Exactly one Tokio worker and one blocking slot. Neither can be consumed
@@ -126,22 +128,23 @@ fn a_busy_codec_does_not_occupy_tokio_workers_or_blocking_io_capacity() {
 }
 
 #[tokio::test]
-async fn synchronous_traits_allow_borrowing_and_async_helpers_accept_custom_error_types() {
+async fn async_helpers_accept_custom_error_types() {
     struct Custom;
     impl Decode for Custom {
         type Error = u8;
-        fn decode(_: &[u8]) -> Result<Self, u8> {
+        fn decode(_: Vec<u8>) -> Result<Self, u8> {
             Err(7)
         }
     }
     impl Encode for Custom {
         type Error = u8;
-        fn encode(&self) -> Result<Cow<'_, [u8]>, u8> {
+        fn encode(self) -> Result<Vec<u8>, u8> {
             Err(8)
         }
     }
-    assert!(matches!(codec::decode::<Custom>("input").await, Err(7)));
+    assert!(matches!(
+        codec::decode::<Custom>(b"input".to_vec()).await,
+        Err(7)
+    ));
     assert_eq!(codec::encode(Custom).await, Err(8));
-    let local = String::from("borrowed");
-    assert!(matches!(local.encode().unwrap(), Cow::Borrowed(_)));
 }

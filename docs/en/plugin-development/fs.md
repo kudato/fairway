@@ -81,10 +81,10 @@ use fairway_fs as fs;
 async fn write_result(target: &Path) -> io::Result<()> {
     let mut output = fs::writer(target).await?;
 
-    output.write("First part\n").await?;
+    output.write("First part\n".to_owned()).await?;
     output.flush().await?;
 
-    output.write("Second part\n").await?;
+    output.write("Second part\n".to_owned()).await?;
     output.finish().await
 }
 ```
@@ -120,7 +120,7 @@ async fn first_hundred_lines(path: &Path) -> io::Result<()> {
             break;
         };
         editor.write(line).await?;
-        editor.write("\n").await?;
+        editor.write("\n".to_owned()).await?;
     }
 
     editor.finish().await
@@ -153,7 +153,7 @@ async fn copy_jsonl(source: &Path, target: &Path) -> anyhow::Result<()> {
     let mut input = fs::reader(source).await?;
     let mut output = fs::writer(target).await?;
     while let Some(line) = input.next_line().await? {
-        let word: Json<String> = codec::decode(line).await?;
+        let word: Json<String> = codec::decode(line.into_bytes()).await?;
         output.write(word).await?;
     }
 
@@ -216,14 +216,14 @@ use fairway_fs as fs;
 
 async fn temporary_data() -> io::Result<()> {
     let file: fs::TempFile = fs::temp_file().await?;
-    fs::write(file.path(), "Temporary data").await?;
+    fs::write(file.path(), "Temporary data".to_owned()).await?;
     let bytes: Vec<u8> = fs::read(file.path()).await?;
     println!("Read {} bytes", bytes.len());
 
     let directory: fs::TempDir = fs::temp_dir().await?;
     let data = directory.path().join("data");
     fs::mkdir(&data).await?;
-    fs::write(data.join("input.txt"), "Data to process").await?;
+    fs::write(data.join("input.txt"), "Data to process".to_owned()).await?;
 
     file.close().await?;
     directory.close().await
@@ -304,7 +304,8 @@ When space runs out, `write` flushes the buffer itself, waiting until it can con
 Calling `flush` after each chunk is unnecessary.
 
 The `contents: V` argument requires `V: Encode + Send + 'static` and is passed by value.
-For text and bytes, pass a `String`, `Vec<u8>`, or string literal.
+For text and bytes, pass an owned `String`, `Vec<u8>`, or byte array.
+Convert a string literal explicitly, for example `"text".to_owned()`.
 Copy a slice of a local buffer into an owned `Vec<u8>` before passing it.
 `fs::write` encodes the entire contents before writing, and `Writer::write` encodes the supplied chunk.
 
@@ -476,7 +477,7 @@ For custom conversions, add `fairway-codec` to the plugin's dependencies
 and import the traits from `fairway_codec`.
 
 `read` requires `T: Decode + Send + 'static`, reads all file bytes,
-and passes them to `T::decode(&bytes)`.
+and passes them to `T::decode(bytes)`.
 `write`, `Writer::write`, and `Editor::write` accept `V: Encode + Send + 'static`.
 `edit` uses `Decode` when reading and `Encode` when saving the handler's result.
 

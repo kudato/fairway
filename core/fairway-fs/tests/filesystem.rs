@@ -1,6 +1,6 @@
 //! End-to-end filesystem behavior through the public API.
 
-use std::{borrow::Cow, io, path::Path, sync::Arc, time::Duration};
+use std::{io, path::Path, sync::Arc, time::Duration};
 
 use fairway_codec::{Decode, Encode, Json, Toml};
 use fairway_fs as fs;
@@ -10,20 +10,20 @@ use tokio::sync::{Notify, oneshot};
 async fn atomic_replacement_keeps_old_readers_and_only_publishes_at_finish() -> io::Result<()> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("data");
-    fs::write(&path, "old\n").await?;
+    fs::write(&path, "old\n".to_owned()).await?;
     let mut old = fs::reader(&path).await?;
     let mut output = fs::writer(&path).await?;
-    output.write("new\n").await?;
+    output.write("new\n".to_owned()).await?;
     output.flush().await?;
     assert_eq!(fs::read::<String>(&path).await?, "old\n");
-    output.write("last").await?;
+    output.write("last".to_owned()).await?;
     output.finish().await?;
     assert_eq!(fs::read::<String>(&path).await?, "new\nlast");
     assert_eq!(old.next_line().await?, Some("old".into()));
     assert_eq!(old.next_line().await?, None);
     let missing = directory.path().join("new");
     let mut output = fs::writer(&missing).await?;
-    output.write(b"bytes").await?;
+    output.write(b"bytes".to_vec()).await?;
     output.flush().await?;
     assert!(!fs::exists(&missing).await?);
     output.finish().await?;
@@ -54,7 +54,7 @@ async fn chunks_larger_than_the_buffer_keep_order_without_manual_flushes() -> io
 async fn lines_and_bytes_share_a_position_and_support_crlf_and_empty_lines() -> io::Result<()> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("lines");
-    fs::write(&path, "prefix猫\r\n\nend").await?;
+    fs::write(&path, "prefix猫\r\n\nend".to_owned()).await?;
     let mut input = fs::reader(path).await?;
     let mut prefix = [0; 6];
     assert_eq!(input.read(&mut prefix).await?, 6);
@@ -94,10 +94,13 @@ async fn edits_wait_and_read_the_last_committed_version() -> io::Result<()> {
 async fn writes_fail_when_busy_and_edits_wait_for_a_streaming_writer() -> io::Result<()> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("data");
-    fs::write(&path, "old").await?;
+    fs::write(&path, "old".to_owned()).await?;
     let mut output = fs::writer(&path).await?;
     assert_eq!(
-        fs::write(&path, "conflict").await.unwrap_err().kind(),
+        fs::write(&path, "conflict".to_owned())
+            .await
+            .unwrap_err()
+            .kind(),
         io::ErrorKind::WouldBlock
     );
     assert!(
@@ -114,7 +117,7 @@ async fn writes_fail_when_busy_and_edits_wait_for_a_streaming_writer() -> io::Re
     });
     tokio::task::yield_now().await;
     assert!(!edit.is_finished());
-    output.write("written").await?;
+    output.write("written".to_owned()).await?;
     output.finish().await?;
     assert_eq!(receiver.await.unwrap(), "written");
     edit.await??;
@@ -126,7 +129,7 @@ async fn writes_fail_when_busy_and_edits_wait_for_a_streaming_writer() -> io::Re
 async fn busy_edit_rejects_write_and_can_be_cancelled_without_publishing() -> io::Result<()> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("data");
-    fs::write(&path, "old").await?;
+    fs::write(&path, "old".to_owned()).await?;
     let held = Arc::new(Notify::new());
     let held_copy = held.clone();
     let edit_path = path.clone();
@@ -139,7 +142,10 @@ async fn busy_edit_rejects_write_and_can_be_cancelled_without_publishing() -> io
     });
     held.notified().await;
     assert_eq!(
-        fs::write(&path, "conflict").await.unwrap_err().kind(),
+        fs::write(&path, "conflict".to_owned())
+            .await
+            .unwrap_err()
+            .kind(),
         io::ErrorKind::WouldBlock
     );
     edit.abort();
@@ -167,7 +173,7 @@ impl std::error::Error for EncodingFailure {}
 struct Invalid;
 impl Encode for Invalid {
     type Error = EncodingFailure;
-    fn encode(&self) -> Result<Cow<'_, [u8]>, Self::Error> {
+    fn encode(self) -> Result<Vec<u8>, Self::Error> {
         Err(EncodingFailure)
     }
 }
@@ -176,12 +182,12 @@ impl Encode for Invalid {
 async fn conversion_failures_preserve_original_and_poison_streaming_writes() -> io::Result<()> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("data");
-    fs::write(&path, "old").await?;
+    fs::write(&path, "old".to_owned()).await?;
     let error = fs::write(&path, Invalid).await.unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
     assert!(error.get_ref().unwrap().is::<EncodingFailure>());
     let mut output = fs::editor(&path).await?;
-    output.write("first").await?;
+    output.write("first".to_owned()).await?;
     assert_eq!(
         output.write(Invalid).await.unwrap_err().kind(),
         io::ErrorKind::InvalidInput
@@ -216,7 +222,7 @@ async fn editor_saves_only_explicit_output_and_requires_an_existing_file() -> io
     assert!(
         matches!(fs::editor(&path).await, Err(error) if error.kind() == io::ErrorKind::NotFound)
     );
-    fs::write(&path, "first\nsecond\nthird").await?;
+    fs::write(&path, "first\nsecond\nthird".to_owned()).await?;
     let mut editor = fs::editor(&path).await?;
     let line = editor.next_line().await?.unwrap_or_default();
     editor.write(line).await?;
@@ -233,7 +239,7 @@ async fn editor_read_errors_prevent_replacement() -> io::Result<()> {
     let path = directory.path().join("bytes");
     fs::write(&path, [0xff, b'\n']).await?;
     let mut editor = fs::editor(&path).await?;
-    editor.write("replacement").await?;
+    editor.write("replacement".to_owned()).await?;
     assert_eq!(
         editor.next_line().await.unwrap_err().kind(),
         io::ErrorKind::InvalidData
@@ -248,7 +254,7 @@ async fn directories_metadata_and_temporary_resources() -> io::Result<()> {
     let directory = fs::temp_dir().await?;
     fs::mkdir(directory.path().join("a/b")).await?;
     fs::mkdir(directory.path().join("a/b")).await?;
-    fs::write(directory.path().join(".hidden"), "abc").await?;
+    fs::write(directory.path().join(".hidden"), "abc".to_owned()).await?;
     let mut entries = fs::ls(&directory).await?;
     let mut names = Vec::new();
     while let Some(entry) = entries.next().await? {
@@ -261,7 +267,7 @@ async fn directories_metadata_and_temporary_resources() -> io::Result<()> {
     assert_eq!(names, [".hidden", "a"]);
     drop(entries);
     let file = fs::temp_file().await?;
-    fs::write(&file, "replaced temporary inode").await?;
+    fs::write(&file, "replaced temporary inode".to_owned()).await?;
     let file_path = file.path().to_owned();
     file.close().await?;
     assert!(!fs::exists(file_path).await?);
@@ -291,7 +297,7 @@ async fn codecs_and_custom_anyhow_errors_work_through_fs() -> anyhow::Result<()>
     struct Custom;
     impl Decode for Custom {
         type Error = anyhow::Error;
-        fn decode(_: &[u8]) -> anyhow::Result<Self> {
+        fn decode(_: Vec<u8>) -> anyhow::Result<Self> {
             anyhow::bail!("custom decoder failed")
         }
     }
@@ -308,7 +314,7 @@ struct EncodeGate {
 
 impl Encode for EncodeGate {
     type Error = std::convert::Infallible;
-    fn encode(&self) -> Result<Cow<'_, [u8]>, Self::Error> {
+    fn encode(self) -> Result<Vec<u8>, Self::Error> {
         self.started
             .lock()
             .unwrap()
@@ -317,7 +323,7 @@ impl Encode for EncodeGate {
             .send(())
             .unwrap();
         self.release.lock().unwrap().recv().unwrap();
-        Ok(Cow::Borrowed(b"new"))
+        Ok(b"new".to_vec())
     }
 }
 
@@ -364,7 +370,7 @@ async fn cancelling_edit_during_decode_retains_lock_and_never_calls_the_handler(
     struct Document;
     impl Decode for Document {
         type Error = std::convert::Infallible;
-        fn decode(_: &[u8]) -> Result<Self, Self::Error> {
+        fn decode(_: Vec<u8>) -> Result<Self, Self::Error> {
             let (started, release) = GATE.lock().unwrap().take().unwrap();
             started.send(()).unwrap();
             release.recv().unwrap();
@@ -373,8 +379,8 @@ async fn cancelling_edit_during_decode_retains_lock_and_never_calls_the_handler(
     }
     impl Encode for Document {
         type Error = std::convert::Infallible;
-        fn encode(&self) -> Result<Cow<'_, [u8]>, Self::Error> {
-            Ok(Cow::Borrowed(b"new"))
+        fn encode(self) -> Result<Vec<u8>, Self::Error> {
+            Ok(b"new".to_vec())
         }
     }
     let directory = tempfile::tempdir()?;
@@ -416,7 +422,7 @@ fn resource_handles_and_standard_operation_futures_are_send() {
     send::<fs::DirEntries>();
     send::<fs::TempFile>();
     send::<fs::TempDir>();
-    future_send(fs::write(Path::new("data"), "value"));
+    future_send(fs::write(Path::new("data"), "value".to_owned()));
     future_send(fs::edit(Path::new("data"), |text: String| async move {
         Ok::<_, io::Error>(text)
     }));
@@ -430,7 +436,7 @@ async fn windows_alternate_streams_survive_file_replacement() -> io::Result<()> 
     std::fs::write(&path, "old")?;
     let stream = path.with_file_name("data:fairway-test");
     std::fs::write(&stream, "stream metadata")?;
-    fs::write(&path, "new").await?;
+    fs::write(&path, "new".to_owned()).await?;
     assert_eq!(std::fs::read_to_string(&stream)?, "stream metadata");
     assert_eq!(fs::read::<String>(&path).await?, "new");
     Ok(())
@@ -446,25 +452,28 @@ mod unix {
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("original");
         let link = directory.path().join("link");
-        fs::write(&path, "old").await?;
+        fs::write(&path, "old".to_owned()).await?;
         symlink(&path, &link)?;
         assert_eq!(fs::read::<String>(&link).await?, "old");
         assert_eq!(
-            fs::write(&link, "bad").await.unwrap_err().kind(),
+            fs::write(&link, "bad".to_owned()).await.unwrap_err().kind(),
             io::ErrorKind::InvalidInput
         );
         let broken = directory.path().join("broken");
         symlink("absent", &broken)?;
         assert!(!fs::exists(&broken).await?);
         assert_eq!(
-            fs::write(&broken, "bad").await.unwrap_err().kind(),
+            fs::write(&broken, "bad".to_owned())
+                .await
+                .unwrap_err()
+                .kind(),
             io::ErrorKind::InvalidInput
         );
         let alias = directory.path().join("alias");
         symlink(directory.path(), &alias)?;
         let output = fs::writer(&path).await?;
         assert_eq!(
-            fs::write(alias.join("original"), "bad")
+            fs::write(alias.join("original"), "bad".to_owned())
                 .await
                 .unwrap_err()
                 .kind(),
@@ -497,7 +506,7 @@ mod unix {
         let attribute = "user.fairway-test";
         xattr::set(&path, attribute, b"value")?;
         let before = std::fs::metadata(&path)?;
-        fs::write(&path, "new").await?;
+        fs::write(&path, "new".to_owned()).await?;
         let after = std::fs::metadata(&path)?;
         assert_ne!(before.ino(), after.ino());
         assert_eq!(
@@ -516,7 +525,7 @@ mod unix {
         let normal = directory.path().join("normal");
         let fairway = directory.path().join("fairway");
         std::fs::write(&normal, "")?;
-        fs::write(&fairway, "").await?;
+        fs::write(&fairway, "".to_owned()).await?;
         assert_eq!(
             std::fs::metadata(normal)?.mode() & 0o777,
             std::fs::metadata(fairway)?.mode() & 0o777
@@ -532,10 +541,13 @@ mod unix {
         let alias = directory.path().join("CAFE\u{301}");
         let mut first = fs::writer(&path).await?;
         assert_eq!(
-            fs::write(&alias, "conflict").await.unwrap_err().kind(),
+            fs::write(&alias, "conflict".to_owned())
+                .await
+                .unwrap_err()
+                .kind(),
             io::ErrorKind::WouldBlock
         );
-        first.write("content").await?;
+        first.write("content".to_owned()).await?;
         first.finish().await?;
         assert_eq!(fs::read::<String>(&alias).await?, "content");
         Ok(())
@@ -564,7 +576,7 @@ mod unix {
         };
         let before = acl()?;
         assert!(!before.is_empty());
-        fs::write(&path, "new").await?;
+        fs::write(&path, "new".to_owned()).await?;
         assert_eq!(acl()?, before);
         Ok(())
     }

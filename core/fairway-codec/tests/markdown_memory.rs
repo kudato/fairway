@@ -69,7 +69,7 @@ fn markdown_retains_only_source_and_does_not_collect_during_traversal() {
     // Allow allocator/test-harness noise without accepting an event collection.
     let allowance = 2 * input.len() + 64 * 1024;
     let before_document = mark();
-    let document = Markdown::parse(&input);
+    let document = Markdown::parse(input.clone());
     let creation_peak = peak_since(before_document);
     assert!(creation_peak <= allowance, "creation peak: {creation_peak}");
 
@@ -97,7 +97,8 @@ fn markdown_retains_only_source_and_does_not_collect_during_traversal() {
         assert!(events.next().is_some());
     }
     assert!(LIVE.load(Relaxed).saturating_sub(before_document) <= allowance);
-    assert_eq!(document.encode().unwrap().as_ref(), input.as_bytes());
-    drop(document);
+    let bytes = document.encode().unwrap();
+    assert_eq!(bytes, input.as_bytes());
+    drop(bytes);
     assert!(LIVE.load(Relaxed).saturating_sub(before_document) <= 64 * 1024);
 }

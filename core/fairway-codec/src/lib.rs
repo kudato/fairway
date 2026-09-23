@@ -4,7 +4,7 @@
 //! use fairway_codec::{decode, encode, Json};
 //! # #[tokio::main(flavor = "current_thread")]
 //! # async fn main() -> Result<(), fairway_codec::Error> {
-//! let words: Json<Vec<String>> = decode(r#"["cat", "dog"]"#).await?;
+//! let words: Json<Vec<String>> = decode(br#"["cat", "dog"]"#.to_vec()).await?;
 //! assert_eq!(encode(words).await?, b"[\"cat\",\"dog\"]\n");
 //! # Ok(())
 //! # }
@@ -28,34 +28,37 @@ pub mod markdown {
     };
 }
 
-use std::{borrow::Cow, convert::Infallible, str::Utf8Error};
+use std::{convert::Infallible, str::Utf8Error};
 
-/// Decodes a complete byte slice into a value.
+/// Decodes an owned byte buffer into a value.
+///
+/// Implementations may reuse the buffer or build a different representation.
+/// Clone the input before calling if it must also remain with the caller.
 pub trait Decode: Sized {
     /// The error produced by this decoder.
     type Error;
 
-    /// Decodes `bytes` without retaining a borrow of them.
-    fn decode(bytes: &[u8]) -> Result<Self, Self::Error>;
+    /// Consumes `bytes`, including on error, and returns the decoded value.
+    fn decode(bytes: Vec<u8>) -> Result<Self, Self::Error>;
 }
 
-/// Encodes a value, borrowing existing bytes when no conversion is needed.
-pub trait Encode {
+/// Consumes a value and returns owned bytes, reusing its storage when possible.
+pub trait Encode: Sized {
     /// The error produced by this encoder.
     type Error;
 
-    /// Returns the encoded representation of this value.
-    fn encode(&self) -> Result<Cow<'_, [u8]>, Self::Error>;
+    /// Consumes this value, including on error, and returns its encoded representation.
+    fn encode(self) -> Result<Vec<u8>, Self::Error>;
 }
 
 /// Decodes owned input in the bounded compute pool, without blocking Tokio workers.
 /// Cancellation does not interrupt a conversion that has already started.
-pub async fn decode<T>(data: impl AsRef<[u8]> + Send + 'static) -> Result<T, T::Error>
+pub async fn decode<T>(bytes: Vec<u8>) -> Result<T, T::Error>
 where
     T: Decode + Send + 'static,
     T::Error: Send + 'static,
 {
-    fairway_compute::run(move || T::decode(data.as_ref())).await
+    fairway_compute::run(move || T::decode(bytes)).await
 }
 
 /// Encodes an owned value in the bounded compute pool and returns owned bytes.
@@ -65,70 +68,46 @@ where
     T: Encode + Send + 'static,
     T::Error: Send + 'static,
 {
-    fairway_compute::run(move || value.encode().map(Cow::into_owned)).await
+    fairway_compute::run(move || value.encode()).await
 }
 
 impl Decode for String {
     type Error = Utf8Error;
 
-    fn decode(bytes: &[u8]) -> Result<Self, Self::Error> {
-        std::str::from_utf8(bytes).map(str::to_owned)
+    fn decode(bytes: Vec<u8>) -> Result<Self, Self::Error> {
+        String::from_utf8(bytes).map_err(|error| error.utf8_error())
     }
 }
 
 impl Decode for Vec<u8> {
     type Error = Infallible;
 
-    fn decode(bytes: &[u8]) -> Result<Self, Self::Error> {
-        Ok(bytes.to_vec())
-    }
-}
-
-impl Encode for str {
-    type Error = Infallible;
-
-    fn encode(&self) -> Result<Cow<'_, [u8]>, Self::Error> {
-        Ok(Cow::Borrowed(self.as_bytes()))
+    fn decode(bytes: Vec<u8>) -> Result<Self, Self::Error> {
+        Ok(bytes)
     }
 }
 
 impl Encode for String {
     type Error = Infallible;
 
-    fn encode(&self) -> Result<Cow<'_, [u8]>, Self::Error> {
-        self.as_str().encode()
-    }
-}
-
-impl Encode for [u8] {
-    type Error = Infallible;
-
-    fn encode(&self) -> Result<Cow<'_, [u8]>, Self::Error> {
-        Ok(Cow::Borrowed(self))
+    fn encode(self) -> Result<Vec<u8>, Self::Error> {
+        Ok(self.into_bytes())
     }
 }
 
 impl<const N: usize> Encode for [u8; N] {
     type Error = Infallible;
 
-    fn encode(&self) -> Result<Cow<'_, [u8]>, Self::Error> {
-        self.as_slice().encode()
+    fn encode(self) -> Result<Vec<u8>, Self::Error> {
+        Ok(self.into())
     }
 }
 
 impl Encode for Vec<u8> {
     type Error = Infallible;
 
-    fn encode(&self) -> Result<Cow<'_, [u8]>, Self::Error> {
-        self.as_slice().encode()
-    }
-}
-
-impl<T: Encode + ?Sized> Encode for &T {
-    type Error = T::Error;
-
-    fn encode(&self) -> Result<Cow<'_, [u8]>, Self::Error> {
-        T::encode(self)
+    fn encode(self) -> Result<Vec<u8>, Self::Error> {
+        Ok(self)
     }
 }
 

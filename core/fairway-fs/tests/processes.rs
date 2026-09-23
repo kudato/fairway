@@ -26,7 +26,7 @@ fn child_process() {
         match action.as_str() {
             "hold" => {
                 let mut output = fs::writer(&target).await?;
-                output.write("new").await?;
+                output.write("new".to_owned()).await?;
                 println!("HELD");
                 io::stdout().flush()?;
                 let mut line = String::new();
@@ -159,7 +159,10 @@ fn another_process_cannot_write_until_the_first_process_finishes() -> io::Result
     runtime.block_on(async {
         assert_eq!(fs::read::<String>(&path).await?, "old");
         assert_eq!(
-            fs::write(&path, "conflict").await.unwrap_err().kind(),
+            fs::write(&path, "conflict".to_owned())
+                .await
+                .unwrap_err()
+                .kind(),
             io::ErrorKind::WouldBlock
         );
         assert!(
@@ -172,7 +175,7 @@ fn another_process_cannot_write_until_the_first_process_finishes() -> io::Result
     writer.0.stdin.as_mut().unwrap().write_all(b"finish\n")?;
     writer.wait();
     assert_eq!(std::fs::read_to_string(&path)?, "new");
-    runtime.block_on(fs::write(&path, "after"))?;
+    runtime.block_on(fs::write(&path, "after".to_owned()))?;
     Ok(())
 }
 

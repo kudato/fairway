@@ -13,7 +13,7 @@ use std::{
 async fn ascii_case_aliases_share_a_lock() -> io::Result<()> {
     let dir = tempfile::tempdir()?;
     let path = dir.path().join("MixedCase");
-    fs::write(&path, "old").await?;
+    fs::write(&path, "old".to_owned()).await?;
     let writer = fs::writer(&path).await?;
     let alias = dir.path().join("MIXEDCASE");
     assert!(matches!(fs::writer(&alias).await, Err(e) if e.kind() == io::ErrorKind::WouldBlock));
@@ -90,14 +90,14 @@ async fn short_file_aliases_share_a_lock_and_preserve_the_long_name() -> io::Res
         matches!(fs::writer(&alias).await, Err(e) if e.kind() == io::ErrorKind::WouldBlock),
         "short and long names must share one lock"
     );
-    writer.write("first").await?;
+    writer.write("first".to_owned()).await?;
     writer.finish().await?;
     // Atomic replacement changes the file's generated short alias, so query it again.
     let length =
         unsafe { GetShortPathNameW(input.as_ptr(), buffer.as_mut_ptr(), buffer.len() as u32) };
     assert!(length > 0 && (length as usize) < buffer.len());
     let alias = std::path::PathBuf::from(OsString::from_wide(&buffer[..length as usize]));
-    fs::write(&alias, "second").await?;
+    fs::write(&alias, "second".to_owned()).await?;
     assert_eq!(
         std::fs::read(&path)?,
         b"second",
@@ -110,13 +110,13 @@ async fn short_file_aliases_share_a_lock_and_preserve_the_long_name() -> io::Res
 async fn editor_byte_cursor_flush_and_path_apis() -> io::Result<()> {
     let dir = tempfile::tempdir()?;
     let path = dir.path().join("данные с пробелами");
-    fs::write(&path, "head猫\r\ntail").await?;
+    fs::write(&path, "head猫\r\ntail".to_owned()).await?;
     let mut edit = fs::editor(&path).await?;
     let mut head = [0; 4];
     assert_eq!(edit.read(&mut head).await?, 4);
     assert_eq!(&head, b"head");
     assert_eq!(edit.next_line().await?, Some("猫".into()));
-    edit.write("changed").await?;
+    edit.write("changed".to_owned()).await?;
     edit.flush().await?;
     assert_eq!(fs::read::<String>(&path).await?, "head猫\r\ntail");
     assert_eq!(edit.next_line().await?, Some("tail".into()));
@@ -141,7 +141,7 @@ async fn long_paths_and_multiple_binary_streams_survive_edit() -> io::Result<()>
     fs::mkdir(&parent).await?;
     let path = parent.join("document.txt");
     assert!(path.as_os_str().encode_wide().count() > 260);
-    fs::write(&path, "old").await?;
+    fs::write(&path, "old".to_owned()).await?;
     let large: Vec<u8> = (0..200_000).map(|i| (i % 251) as u8).collect();
     for (name, value) in [
         ("binary", large.as_slice()),
@@ -180,7 +180,7 @@ async fn failed_commit_releases_lock_and_removes_staging_file() -> io::Result<()
         .share_mode(1 | 2)
         .open(&path)?;
     let mut writer = fs::writer(&path).await?;
-    writer.write("new").await?;
+    writer.write("new".to_owned()).await?;
     assert!(writer.finish().await.is_err());
     assert_eq!(std::fs::read(&path)?, b"old");
     assert_eq!(
@@ -189,7 +189,7 @@ async fn failed_commit_releases_lock_and_removes_staging_file() -> io::Result<()
         "failed transaction leaked staging file"
     );
     drop(held);
-    fs::write(&path, "after").await?;
+    fs::write(&path, "after".to_owned()).await?;
     assert_eq!(std::fs::read(&path)?, b"after");
     Ok(())
 }
@@ -207,7 +207,7 @@ async fn junction_parent_aliases_share_a_lock() -> io::Result<()> {
         .output()?;
     assert!(output.status.success(), "{output:?}");
     let path = target.join("data");
-    fs::write(&path, "old").await?;
+    fs::write(&path, "old".to_owned()).await?;
     let writer = fs::writer(&path).await?;
     assert!(
         matches!(fs::writer(alias.join("data")).await, Err(e) if e.kind() == io::ErrorKind::WouldBlock)
@@ -230,7 +230,7 @@ async fn readonly_target_failure_does_not_leak_readonly_staging_files() -> io::R
     let mut permissions = original_permissions.clone();
     permissions.set_readonly(true);
     std::fs::set_permissions(&path, permissions)?;
-    let result = fs::write(&path, "new").await;
+    let result = fs::write(&path, "new".to_owned()).await;
     let count = std::fs::read_dir(dir.path())?.count();
     let contents = std::fs::read(&path)?;
     std::fs::set_permissions(&path, original_permissions)?;
@@ -267,7 +267,7 @@ async fn replacement_preserves_a_protected_dacl() -> io::Result<()> {
     assert!(changed.status.success(), "{changed:?}");
     let before = std::process::Command::new("icacls").arg(&path).output()?;
     assert!(before.status.success());
-    fs::write(&path, "new").await?;
+    fs::write(&path, "new".to_owned()).await?;
     let after = std::process::Command::new("icacls").arg(&path).output()?;
     assert!(after.status.success());
     assert_eq!(

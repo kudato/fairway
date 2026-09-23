@@ -58,7 +58,7 @@ where
         Ok(bytes)
     })
     .await?;
-    fairway_compute::run(move || T::decode(&bytes).map_err(decode_error)).await
+    fairway_compute::run(move || T::decode(bytes).map_err(decode_error)).await
 }
 
 /// Atomically creates or replaces a regular file. A busy path returns `WouldBlock`.
@@ -97,7 +97,7 @@ where
     };
     // The worker owns the editor, including its lock, until decoding ends.
     let (mut output, value) = fairway_compute::run(move || {
-        let value = T::decode(&bytes).map_err(decode_error);
+        let value = T::decode(bytes).map_err(decode_error);
         (output, value)
     })
     .await;

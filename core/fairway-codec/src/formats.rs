@@ -1,4 +1,4 @@
-use std::{borrow::Cow, str::Utf8Error};
+use std::str::Utf8Error;
 
 use serde::{Serialize, de::DeserializeOwned};
 
@@ -24,11 +24,11 @@ impl<T> AsRef<T> for Json<T> {
 impl<T: DeserializeOwned> Decode for Json<T> {
     type Error = Error;
 
-    fn decode(bytes: &[u8]) -> Result<Self, Self::Error> {
+    fn decode(bytes: Vec<u8>) -> Result<Self, Self::Error> {
         // Serde visitors may skip strings. Validate UTF-8 regardless of T.
-        std::str::from_utf8(bytes)
-            .map_err(|error| crate::error::utf8_error("json", bytes, error, 0))?;
-        serde_json::from_slice(bytes)
+        std::str::from_utf8(&bytes)
+            .map_err(|error| crate::error::utf8_error("json", &bytes, error, 0))?;
+        serde_json::from_slice(&bytes)
             .map(Self)
             .map_err(|error| json_error("json", error, 0))
     }
@@ -37,13 +37,13 @@ impl<T: DeserializeOwned> Decode for Json<T> {
 impl<T: Serialize> Encode for Json<T> {
     type Error = Error;
 
-    fn encode(&self) -> Result<Cow<'_, [u8]>, Self::Error> {
+    fn encode(self) -> Result<Vec<u8>, Self::Error> {
         let mut bytes = serde_json::to_vec(&self.0).map_err(|source| Error::Encode {
             format: "json",
             source: Box::new(source),
         })?;
         bytes.push(b'\n');
-        Ok(Cow::Owned(bytes))
+        Ok(bytes)
     }
 }
 
@@ -67,9 +67,9 @@ impl<T> AsRef<T> for Toml<T> {
 impl<T: DeserializeOwned> Decode for Toml<T> {
     type Error = Error;
 
-    fn decode(bytes: &[u8]) -> Result<Self, Self::Error> {
-        let text = std::str::from_utf8(bytes).map_err(|source| {
-            let (line, column) = position(bytes, source.valid_up_to());
+    fn decode(bytes: Vec<u8>) -> Result<Self, Self::Error> {
+        let text = std::str::from_utf8(&bytes).map_err(|source| {
+            let (line, column) = position(&bytes, source.valid_up_to());
             Error::Decode {
                 format: "toml",
                 line: Some(line),
@@ -80,7 +80,7 @@ impl<T: DeserializeOwned> Decode for Toml<T> {
         toml::from_str(text)
             .map(Self)
             .map_err(|source: toml::de::Error| {
-                let pos = source.span().map(|span| position(bytes, span.start));
+                let pos = source.span().map(|span| position(&bytes, span.start));
                 Error::Decode {
                     format: "toml",
                     line: pos.map(|p| p.0),
@@ -105,9 +105,9 @@ fn position(bytes: &[u8], offset: usize) -> (u64, u64) {
 impl<T: Serialize> Encode for Toml<T> {
     type Error = Error;
 
-    fn encode(&self) -> Result<Cow<'_, [u8]>, Self::Error> {
+    fn encode(self) -> Result<Vec<u8>, Self::Error> {
         toml::to_string(&self.0)
-            .map(|text| Cow::Owned(text.into_bytes()))
+            .map(String::into_bytes)
             .map_err(|source| Error::Encode {
                 format: "toml",
                 source: Box::new(source),
@@ -125,11 +125,9 @@ pub struct Markdown {
 }
 
 impl Markdown {
-    /// Copies any UTF-8 text into a document without parsing its structure.
-    pub fn parse(text: &str) -> Self {
-        Self {
-            source: text.to_owned(),
-        }
+    /// Takes ownership of UTF-8 text without copying or parsing its structure.
+    pub fn parse(source: String) -> Self {
+        Self { source }
     }
 
     /// Creates a fresh iterator over the document's structural events.
@@ -147,7 +145,7 @@ impl Markdown {
     /// use fairway_codec::Markdown;
     ///
     /// let events: Vec<_> = {
-    ///     let document = Markdown::parse("# Heading\n");
+    ///     let document = Markdown::parse("# Heading\n".to_owned());
     ///     document.events().map(|event| event.into_static()).collect()
     /// };
     /// assert_eq!(events.len(), 3);
@@ -157,20 +155,26 @@ impl Markdown {
     }
 }
 
+impl AsRef<str> for Markdown {
+    fn as_ref(&self) -> &str {
+        &self.source
+    }
+}
+
 impl Decode for Markdown {
     type Error = Utf8Error;
 
-    fn decode(bytes: &[u8]) -> Result<Self, Self::Error> {
-        Ok(Self::parse(std::str::from_utf8(bytes)?))
+    fn decode(bytes: Vec<u8>) -> Result<Self, Self::Error> {
+        String::decode(bytes).map(Self::parse)
     }
 }
 
 impl Encode for Markdown {
     type Error = Error;
 
-    fn encode(&self) -> Result<Cow<'_, [u8]>, Self::Error> {
+    fn encode(self) -> Result<Vec<u8>, Self::Error> {
         // Reusing the source preserves formatting and escaping without parsing
         // or reconstructing the document from structural events.
-        Ok(Cow::Borrowed(self.source.as_bytes()))
+        Ok(self.source.into_bytes())
     }
 }
