@@ -8,17 +8,19 @@ mod signal;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use fairway_cli::__private::Cli;
+
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
 
 fn main() -> ExitCode {
     app::run(cli(), std::env::args_os(), SHUTDOWN_TIMEOUT, || Ok(()))
 }
 
-fn cli() -> fairway_cli::Cli {
+fn cli() -> Cli {
     let root = clap::Command::new("fairway")
         .version(env!("CARGO_PKG_VERSION"))
         .about(env!("CARGO_PKG_DESCRIPTION"));
-    fairway_cli::Cli::new(root)
+    Cli::new(root)
 }
 
 #[cfg(test)]

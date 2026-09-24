@@ -15,7 +15,6 @@
 //! [`Shutdown`], both in that order, or neither. Its future must be
 //! `Send` and return `anyhow::Result<()>`.
 //!
-//! [`Cli::parse`] returns a [`PreparedCommand`] to the application.
 //! Fairway owns the runtime, signal handling, and process lifecycle.
 //! Plugins only need [`namespace!`], [`command!`], and optionally [`Shutdown`].
 
@@ -32,17 +31,15 @@ mod guide_ru {}
 #[doc = include_str!("../../../docs/en/plugin-development/cli.md")]
 mod guide_en {}
 
-use std::ffi::OsString;
-
 use tokio_util::sync::CancellationToken;
 
-pub use handler::{PreparedCommand, Threading};
 pub use registry::Namespace;
 
-// Paths used by macro expansions in plugin crates, not a separate API.
+// Paths used by Fairway and macro expansions in plugin crates.
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::handler::{augment, prepare};
+    pub use crate::handler::{PreparedCommand, Threading, augment, prepare};
+    pub use crate::parse::Cli;
     pub use crate::registry::{Command, CommandKind, FAIRWAY_CLI_COMMANDS, FAIRWAY_CLI_NAMESPACES};
     pub use clap;
     pub use linkme;
@@ -81,53 +78,5 @@ impl From<CancellationToken> for Shutdown {
     /// Observes the shutdown token controlled by the application.
     fn from(token: CancellationToken) -> Self {
         Self { token }
-    }
-}
-
-/// The command-line parser used by the Fairway application.
-///
-/// The application supplies its name, version, and description in
-/// `root`. Registered plugins supply the namespaces and commands.
-pub struct Cli {
-    root: clap::Command,
-}
-
-impl Cli {
-    /// Creates a parser using the application's metadata and linked commands.
-    #[must_use]
-    pub fn new(root: clap::Command) -> Self {
-        Self { root }
-    }
-
-    /// Checks the linked namespaces, commands, and clap argument definitions.
-    ///
-    /// Call this in an application test with the same plugins and features
-    /// as the shipped application. Use the default test profile: clap's
-    /// argument checks require debug assertions. It does not run command
-    /// handlers or worker selectors. `cargo build` alone does not run this check.
-    ///
-    /// # Panics
-    ///
-    /// Panics on duplicate names or incompatible registrations, and on
-    /// invalid clap argument definitions when debug assertions are enabled.
-    /// Registration conflicts include both declaration locations.
-    pub fn assert_valid(self) {
-        registry::assert_valid();
-        parse::tree(self.root, parse::grouped()).debug_assert();
-    }
-
-    /// Parses `args` and prepares the selected command for the application.
-    ///
-    /// `args` includes the executable name, as in `std::env::args_os()`.
-    /// The command contains the parsed arguments and chosen thread count.
-    /// The handler runs when the application awaits [`PreparedCommand::run`].
-    ///
-    /// Help, version, and invalid arguments return a [`clap::Error`]. The
-    /// application uses its diagnostic and exit code to report the result.
-    pub fn parse(
-        self,
-        args: impl IntoIterator<Item = OsString>,
-    ) -> Result<PreparedCommand, clap::Error> {
-        parse::parse(self.root, args)
     }
 }

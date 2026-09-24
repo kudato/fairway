@@ -1,6 +1,6 @@
 //! Statically registered namespaces and commands.
 
-use crate::PreparedCommand;
+use crate::handler::PreparedCommand;
 
 /// A namespace declared by [`namespace!`](crate::namespace).
 ///

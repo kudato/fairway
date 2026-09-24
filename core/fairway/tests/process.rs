@@ -18,7 +18,8 @@ use std::{
     time::Instant,
 };
 
-use fairway_cli::{Cli, Shutdown};
+use fairway_cli::__private::Cli;
+use fairway_cli::Shutdown;
 
 fairway_cli::namespace!(CLI, "probe", "Process tests");
 

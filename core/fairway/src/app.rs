@@ -6,7 +6,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use anyhow::Context;
-use fairway_cli::{Cli, Threading};
+use fairway_cli::__private::{Cli, Threading};
 
 use crate::signal::Supervisor;
 

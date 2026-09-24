@@ -3,7 +3,7 @@
 /// Declares `pub(crate) static NAME: Namespace` for `fairway <name>`.
 ///
 /// Namespace names must be unique across the linked application.
-/// The application's test checks this with [`Cli::assert_valid`](crate::Cli::assert_valid).
+/// The application's registry test checks this.
 ///
 /// ```
 /// fairway_cli::namespace!(CLI, "text", "Text commands");
@@ -44,8 +44,8 @@ macro_rules! namespace {
 /// `command!(CLI, "about", handler)` handles `fairway <namespace>`.
 /// `command!(CLI, "name", "about", handler)` adds a subcommand.
 /// A namespace supports one of these forms, never both; mixing them is
-/// a compile error. Duplicate subcommand names are checked by
-/// [`Cli::assert_valid`](crate::Cli::assert_valid).
+/// a compile error. Duplicate subcommand names are checked by the
+/// application's registry test.
 ///
 /// `workers = N` requests N Tokio worker threads from Fairway; zero uses
 /// the available parallelism. Without `workers`, Fairway runs the command
@@ -97,7 +97,7 @@ macro_rules! __declare {
 
         fn prepare(
             matches: &mut $crate::__private::clap::ArgMatches,
-        ) -> ::core::result::Result<$crate::PreparedCommand, $crate::__private::clap::Error> {
+        ) -> ::core::result::Result<$crate::__private::PreparedCommand, $crate::__private::clap::Error> {
             $crate::__private::prepare($run, matches, $crate::__workers!($($workers)?))
         }
 
@@ -119,7 +119,7 @@ macro_rules! __declare {
 #[macro_export]
 macro_rules! __workers {
     () => {
-        $crate::Threading::CurrentThread
+        $crate::__private::Threading::CurrentThread
     };
     ($workers:expr) => {
         $workers

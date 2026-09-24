@@ -6,27 +6,68 @@ use std::sync::OnceLock;
 
 use clap::ArgMatches;
 
-use crate::PreparedCommand;
+use crate::handler::PreparedCommand;
 use crate::registry::{Command, FAIRWAY_CLI_COMMANDS, FAIRWAY_CLI_NAMESPACES, Namespace};
 
-pub(crate) struct Group<'a> {
+/// The command-line parser used by the Fairway application.
+///
+/// The application supplies its name, version, and description in
+/// `root`. Registered plugins supply the namespaces and commands.
+pub struct Cli {
+    root: clap::Command,
+}
+
+impl Cli {
+    /// Creates a parser using the application's metadata and linked commands.
+    #[must_use]
+    pub fn new(root: clap::Command) -> Self {
+        Self { root }
+    }
+
+    /// Checks the linked namespaces, commands, and clap argument definitions.
+    ///
+    /// Call this in an application test with the same plugins and features
+    /// as the shipped application. Use the default test profile: clap's
+    /// argument checks require debug assertions. It does not run command
+    /// handlers or worker selectors. `cargo build` alone does not run this check.
+    ///
+    /// # Panics
+    ///
+    /// Panics on duplicate names or incompatible registrations, and on
+    /// invalid clap argument definitions when debug assertions are enabled.
+    /// Registration conflicts include both declaration locations.
+    pub fn assert_valid(self) {
+        crate::registry::assert_valid();
+        tree(self.root, grouped()).debug_assert();
+    }
+
+    /// Parses `args` and prepares the selected command for the application.
+    ///
+    /// `args` includes the executable name, as in `std::env::args_os()`.
+    /// The command contains the parsed arguments and chosen thread count.
+    /// The handler runs when the application awaits [`PreparedCommand::run`].
+    ///
+    /// Help, version, and invalid arguments return a [`clap::Error`]. The
+    /// application uses its diagnostic and exit code to report the result.
+    pub fn parse(
+        self,
+        args: impl IntoIterator<Item = OsString>,
+    ) -> Result<PreparedCommand, clap::Error> {
+        let groups = grouped();
+        let mut matches = tree(self.root, groups).try_get_matches_from(args)?;
+        let (command, mut matches) = selected(groups, &mut matches)
+            .expect("clap requires a namespace and its handler or a subcommand");
+        (command.prepare)(&mut matches)
+    }
+}
+
+struct Group<'a> {
     namespace: &'a Namespace,
     own: Option<&'a Command>,
     named: Vec<(&'static str, &'a Command)>,
 }
 
-pub(crate) fn parse(
-    root: clap::Command,
-    args: impl IntoIterator<Item = OsString>,
-) -> Result<PreparedCommand, clap::Error> {
-    let groups = grouped();
-    let mut matches = tree(root, groups).try_get_matches_from(args)?;
-    let (command, mut matches) = selected(groups, &mut matches)
-        .expect("clap requires a namespace and its handler or a subcommand");
-    (command.prepare)(&mut matches)
-}
-
-pub(crate) fn grouped() -> &'static [Group<'static>] {
+fn grouped() -> &'static [Group<'static>] {
     // Only linked declarations are cached; clap configuration remains per call.
     static GROUPS: OnceLock<Vec<Group<'static>>> = OnceLock::new();
     GROUPS.get_or_init(build_groups)
@@ -65,7 +106,7 @@ fn build_groups() -> Vec<Group<'static>> {
     groups
 }
 
-pub(crate) fn tree(root: clap::Command, groups: &[Group<'_>]) -> clap::Command {
+fn tree(root: clap::Command, groups: &[Group<'_>]) -> clap::Command {
     let mut root = root.subcommand_required(true).arg_required_else_help(true);
     for group in groups {
         let mut namespace = clap::Command::new(group.namespace.name);

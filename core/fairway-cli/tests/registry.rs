@@ -4,7 +4,7 @@ use std::cell::Cell;
 use std::ffi::OsString;
 use std::sync::Barrier;
 
-use fairway_cli::{Cli, Threading};
+use fairway_cli::__private::{Cli, PreparedCommand, Threading};
 
 fairway_cli::namespace!(FIRST, "first", "First namespace");
 fairway_cli::namespace!(TOOLS, "tools", "Named commands");
@@ -50,7 +50,7 @@ fn parse(
     name: &'static str,
     version: &'static str,
     args: &[&str],
-) -> Result<fairway_cli::PreparedCommand, clap::Error> {
+) -> Result<PreparedCommand, clap::Error> {
     let before = AUGMENTS.get();
     let result =
         Cli::new(clap::Command::new(name).version(version)).parse(args.iter().map(OsString::from));

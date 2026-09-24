@@ -5,7 +5,8 @@ use std::sync::Mutex;
 
 use tokio_util::sync::CancellationToken;
 
-use fairway_cli::{Cli, PreparedCommand, Shutdown, Threading};
+use fairway_cli::__private::{Cli, PreparedCommand, Threading};
+use fairway_cli::Shutdown;
 
 fairway_cli::namespace!(CLI, "text", "Text commands");
 fairway_cli::namespace!(HELLO, "hello", "Greeting");
