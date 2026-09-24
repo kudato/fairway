@@ -30,6 +30,23 @@ fn raw_data_is_owned_and_custom_errors_need_no_io_conversion() {
     assert_eq!(Custom.encode(), Err(8));
 }
 
+#[test]
+fn only_conversions_that_pass_bytes_as_is_are_no_ops() {
+    const {
+        assert!(<Vec<u8> as Decode>::IS_NOOP);
+        assert!(!<String as Decode>::IS_NOOP);
+        assert!(!<Markdown as Decode>::IS_NOOP);
+        assert!(!<Json<Vec<u8>> as Decode>::IS_NOOP);
+        assert!(!<Toml<Dataset> as Decode>::IS_NOOP);
+        assert!(<Vec<u8> as Encode>::IS_NOOP);
+        assert!(<[u8; 2] as Encode>::IS_NOOP);
+        assert!(<String as Encode>::IS_NOOP);
+        assert!(<Markdown as Encode>::IS_NOOP);
+        assert!(!<Json<Vec<u8>> as Encode>::IS_NOOP);
+        assert!(!<Toml<Dataset> as Encode>::IS_NOOP);
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 struct Dataset {
     name: String,

@@ -9,6 +9,8 @@
 `Json<Vec<String>>` — JSON-массив строк.
 
 Обе функции выполняют преобразование в вычислительном пуле Fairway.
+Преобразование, которое передаёт байты как есть (`IS_NOOP`), например
+декодирование в `Vec<u8>`, выполняется на месте.
 Декодирование получает `Vec<u8>` во владение; кодирование потребляет значение
 и возвращает собственный буфер. Контракт одинаков для данных из файлов,
 процессов, сети и памяти. Если исходник нужно оставить у вызывающего кода,
@@ -317,12 +319,13 @@ async fn change_title(input: String, title: String) -> anyhow::Result<Vec<u8>> {
 
 ### Преобразование
 
-- `decode::<T>(data).await -> Result<T, T::Error>` — вызывает `T::decode` в пуле.
+- `decode::<T>(data).await -> Result<T, T::Error>` — вызывает `T::decode` в пуле
+  (на месте при `IS_NOOP = true`).
   Требуется `T: Decode + Send + 'static`, `T::Error: Send + 'static`.
   Аргумент `data` — собственный `Vec<u8>`.
 - `encode(value).await -> Result<Vec<u8>, T::Error>` — вызывает `T::encode` в пуле
-  и возвращает собственный буфер. Требуется `T: Encode + Send + 'static`,
-  `T::Error: Send + 'static`.
+  (на месте при `IS_NOOP = true`) и возвращает собственный буфер.
+  Требуется `T: Encode + Send + 'static`, `T::Error: Send + 'static`.
 
 Функции потребляют входные данные, в том числе при ошибке. Для декодирования
 передавайте `Vec<u8>`; `String` преобразуется через `.into_bytes()` без копирования.
@@ -334,11 +337,15 @@ async fn change_title(input: String, title: String) -> anyhow::Result<Vec<u8>> {
 `Decode: Sized` задаёт разбор данных:
 
 - `type Error` — тип ошибки декодирования.
+- `const IS_NOOP: bool` — декодирование передаёт байты как есть, без разбора и проверки.
+  По умолчанию `false`; из встроенных типов `true` только у `Vec<u8>`.
 - `decode(bytes: Vec<u8>) -> Result<Self, Self::Error>` — разбирает байты в значение.
 
 `Encode: Sized` задаёт кодирование значения:
 
 - `type Error` — тип ошибки кодирования.
+- `const IS_NOOP: bool` — кодирование возвращает байты значения как есть.
+  По умолчанию `false`; `true` у `Vec<u8>`, `[u8; N]`, `String` и `Markdown`.
 - `encode(self) -> Result<Vec<u8>, Self::Error>` — возвращает представление в байтах.
 
 Оба трейта потребляют вход и возвращают собственный результат. Реализация может
@@ -518,6 +525,7 @@ async fn change_title(input: String, title: String) -> anyhow::Result<Vec<u8>> {
 Способ выполнения задаётся вызовом и не зависит от размера данных:
 
 - `codec::decode` и `codec::encode` передают преобразование в общий пул [fairway-compute](compute.md).
+  Преобразования с `IS_NOOP = true` выполняются на месте.
 - Методы `Decode`, `Encode`, `StreamDecode` и `StreamEncode` выполняются на текущем потоке
   и не должны выполнять ввод-вывод.
 

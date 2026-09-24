@@ -38,6 +38,10 @@ pub trait Decode: Sized {
     /// The error produced by this decoder.
     type Error;
 
+    /// Whether decoding is a no-op: the bytes become the value as is, without
+    /// parsing or validation. Callers may then decode in place, outside the compute pool.
+    const IS_NOOP: bool = false;
+
     /// Consumes `bytes`, including on error, and returns the decoded value.
     fn decode(bytes: Vec<u8>) -> Result<Self, Self::Error>;
 }
@@ -47,28 +51,42 @@ pub trait Encode: Sized {
     /// The error produced by this encoder.
     type Error;
 
+    /// Whether encoding is a no-op: the value's bytes are returned as is, without
+    /// processing. Callers may then encode in place, outside the compute pool.
+    const IS_NOOP: bool = false;
+
     /// Consumes this value, including on error, and returns its encoded representation.
     fn encode(self) -> Result<Vec<u8>, Self::Error>;
 }
 
 /// Decodes owned input in the bounded compute pool, without blocking Tokio workers.
+/// A [no-op](Decode::IS_NOOP) conversion runs in place instead.
 /// Cancellation does not interrupt a conversion that has already started.
 pub async fn decode<T>(bytes: Vec<u8>) -> Result<T, T::Error>
 where
     T: Decode + Send + 'static,
     T::Error: Send + 'static,
 {
-    fairway_compute::run(move || T::decode(bytes)).await
+    if T::IS_NOOP {
+        T::decode(bytes)
+    } else {
+        fairway_compute::run(move || T::decode(bytes)).await
+    }
 }
 
 /// Encodes an owned value in the bounded compute pool and returns owned bytes.
+/// A [no-op](Encode::IS_NOOP) conversion runs in place instead.
 /// Cancellation does not interrupt a conversion that has already started.
 pub async fn encode<T>(value: T) -> Result<Vec<u8>, T::Error>
 where
     T: Encode + Send + 'static,
     T::Error: Send + 'static,
 {
-    fairway_compute::run(move || value.encode()).await
+    if T::IS_NOOP {
+        value.encode()
+    } else {
+        fairway_compute::run(move || value.encode()).await
+    }
 }
 
 impl Decode for String {
@@ -81,6 +99,7 @@ impl Decode for String {
 
 impl Decode for Vec<u8> {
     type Error = Infallible;
+    const IS_NOOP: bool = true;
 
     fn decode(bytes: Vec<u8>) -> Result<Self, Self::Error> {
         Ok(bytes)
@@ -89,6 +108,7 @@ impl Decode for Vec<u8> {
 
 impl Encode for String {
     type Error = Infallible;
+    const IS_NOOP: bool = true;
 
     fn encode(self) -> Result<Vec<u8>, Self::Error> {
         Ok(self.into_bytes())
@@ -97,6 +117,7 @@ impl Encode for String {
 
 impl<const N: usize> Encode for [u8; N] {
     type Error = Infallible;
+    const IS_NOOP: bool = true;
 
     fn encode(self) -> Result<Vec<u8>, Self::Error> {
         Ok(self.into())
@@ -105,6 +126,7 @@ impl<const N: usize> Encode for [u8; N] {
 
 impl Encode for Vec<u8> {
     type Error = Infallible;
+    const IS_NOOP: bool = true;
 
     fn encode(self) -> Result<Vec<u8>, Self::Error> {
         Ok(self)

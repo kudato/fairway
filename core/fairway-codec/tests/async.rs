@@ -34,6 +34,36 @@ async fn owned_async_conversions_cover_all_document_types() -> anyhow::Result<()
     Ok(())
 }
 
+#[tokio::test]
+async fn only_no_op_conversions_skip_the_compute_pool() {
+    fn pooled() -> bool {
+        std::thread::current()
+            .name()
+            .unwrap_or_default()
+            .starts_with("fairway-compute-")
+    }
+    // Decoding records where it ran; encoding returns where it ran.
+    struct Probe<const NOOP: bool>(bool);
+    impl<const NOOP: bool> Decode for Probe<NOOP> {
+        type Error = Infallible;
+        const IS_NOOP: bool = NOOP;
+        fn decode(_: Vec<u8>) -> Result<Self, Infallible> {
+            Ok(Self(pooled()))
+        }
+    }
+    impl<const NOOP: bool> Encode for Probe<NOOP> {
+        type Error = Infallible;
+        const IS_NOOP: bool = NOOP;
+        fn encode(self) -> Result<Vec<u8>, Infallible> {
+            Ok(vec![u8::from(pooled())])
+        }
+    }
+    assert!(!codec::decode::<Probe<true>>(Vec::new()).await.unwrap().0);
+    assert!(codec::decode::<Probe<false>>(Vec::new()).await.unwrap().0);
+    assert_eq!(codec::encode(Probe::<true>(false)).await.unwrap(), [0]);
+    assert_eq!(codec::encode(Probe::<false>(false)).await.unwrap(), [1]);
+}
+
 #[test]
 fn markdown_analysis_runs_in_the_compute_pool_when_decoded_as_a_custom_type() {
     use fairway_codec::markdown::Event;

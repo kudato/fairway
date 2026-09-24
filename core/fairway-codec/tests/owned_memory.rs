@@ -108,7 +108,9 @@ fn owned_whole_document_and_stream_paths_do_not_allocate_another_input_buffer() 
         .build()
         .unwrap();
     // Initialize the shared compute pool before measuring codec allocations.
-    runtime.block_on(codec::encode(Vec::<u8>::new())).unwrap();
+    runtime
+        .block_on(codec::decode::<Markdown>(Vec::new()))
+        .unwrap();
     let bytes = without_input_copy("async Markdown round trip", bytes, |bytes| {
         runtime.block_on(async {
             codec::encode(codec::decode::<Markdown>(bytes).await.unwrap())

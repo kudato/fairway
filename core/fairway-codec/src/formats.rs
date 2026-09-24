@@ -171,6 +171,7 @@ impl Decode for Markdown {
 
 impl Encode for Markdown {
     type Error = Error;
+    const IS_NOOP: bool = true;
 
     fn encode(self) -> Result<Vec<u8>, Self::Error> {
         // Reusing the source preserves formatting and escaping without parsing

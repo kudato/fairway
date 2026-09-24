@@ -8,7 +8,8 @@
 encodes a value into a `Vec<u8>`. The value's type selects the format:
 for example, `Json<Vec<String>>` represents a JSON array of strings.
 
-Both functions perform the conversion in Fairway's compute pool.
+Both functions perform the conversion in Fairway's compute pool. A conversion that
+passes bytes as is (`IS_NOOP`), such as decoding into `Vec<u8>`, runs in place.
 Decoding takes ownership of a `Vec<u8>`; encoding consumes the value and returns
 an owned buffer. This contract is the same for data from files, processes,
 network connections, and memory. If the input must remain with the caller,
@@ -318,12 +319,13 @@ by [Rust's orphan rules](https://doc.rust-lang.org/reference/items/implementatio
 
 ### Conversion
 
-- `decode::<T>(data).await -> Result<T, T::Error>` calls `T::decode` in the pool.
+- `decode::<T>(data).await -> Result<T, T::Error>` calls `T::decode` in the pool
+  (in place with `IS_NOOP = true`).
   Requires `T: Decode + Send + 'static` and `T::Error: Send + 'static`.
   The `data` argument is an owned `Vec<u8>`.
 - `encode(value).await -> Result<Vec<u8>, T::Error>` calls `T::encode` in the pool
-  and returns an owned buffer. Requires `T: Encode + Send + 'static`
-  and `T::Error: Send + 'static`.
+  (in place with `IS_NOOP = true`) and returns an owned buffer.
+  Requires `T: Encode + Send + 'static` and `T::Error: Send + 'static`.
 
 The functions consume their inputs, including on error. Pass a `Vec<u8>` for
 decoding, or transfer a `String` with `.into_bytes()` without copying. A slice
@@ -335,11 +337,15 @@ such as `Json(value)`. References to local values do not satisfy `'static`.
 `Decode: Sized` defines decoding:
 
 - `type Error` is the decoding error type.
+- `const IS_NOOP: bool` states that decoding passes bytes as is, without parsing
+  or validation. Defaults to `false`; among built-in types, only `Vec<u8>` sets `true`.
 - `decode(bytes: Vec<u8>) -> Result<Self, Self::Error>` decodes bytes into a value.
 
 `Encode: Sized` defines encoding:
 
 - `type Error` is the encoding error type.
+- `const IS_NOOP: bool` states that encoding returns the value's bytes as is.
+  Defaults to `false`; `Vec<u8>`, `[u8; N]`, `String`, and `Markdown` set `true`.
 - `encode(self) -> Result<Vec<u8>, Self::Error>` returns the byte representation.
 
 Both traits consume their inputs and return owned results. Implementations may
@@ -518,6 +524,7 @@ The encoder reuses the existing `Encode` implementation and requires exactly one
 The call determines where the conversion runs, regardless of input size:
 
 - `codec::decode` and `codec::encode` submit conversions to the shared [fairway-compute](compute.md) pool.
+  Conversions with `IS_NOOP = true` run in place.
 - `Decode`, `Encode`, `StreamDecode`, and `StreamEncode` methods run on the current thread
   and must not perform I/O.
 
