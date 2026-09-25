@@ -33,7 +33,7 @@ type BoxError = Box<dyn Error + Send + Sync + 'static>;
 pub async fn read<T>(path: impl AsRef<Path>) -> io::Result<T>
 where
     T: Decode + Send + 'static,
-    T::Error: Into<BoxError>,
+    T::Error: Into<BoxError> + Send,
 {
     let path = absolute(path.as_ref())?;
     let bytes = blocking(move || {
@@ -58,7 +58,7 @@ where
         Ok(bytes)
     })
     .await?;
-    fairway_compute::run(move || T::decode(bytes).map_err(decode_error)).await
+    fairway_codec::decode(bytes).await.map_err(decode_error)
 }
 
 /// Atomically creates or replaces a regular file. A busy path returns `WouldBlock`.
@@ -66,7 +66,7 @@ where
 pub async fn write<V>(path: impl AsRef<Path>, contents: V) -> io::Result<()>
 where
     V: Encode + Send + 'static,
-    V::Error: Into<BoxError>,
+    V::Error: Into<BoxError> + Send,
 {
     let mut output = writer(path).await?;
     if let Err(error) = output.write(contents).await {
@@ -81,8 +81,8 @@ where
 pub async fn edit<T, E, F, Fut>(path: impl AsRef<Path>, handler: F) -> Result<(), E>
 where
     T: Decode + Encode + Send + 'static,
-    <T as Decode>::Error: Into<BoxError>,
-    <T as Encode>::Error: Into<BoxError>,
+    <T as Decode>::Error: Into<BoxError> + Send,
+    <T as Encode>::Error: Into<BoxError> + Send,
     E: From<io::Error>,
     F: FnOnce(T) -> Fut,
     Fut: Future<Output = Result<T, E>> + Send,
@@ -95,12 +95,9 @@ where
             return Err(error.into());
         }
     };
-    // The worker owns the editor, including its lock, until decoding ends.
-    let (mut output, value) = fairway_compute::run(move || {
-        let value = T::decode(bytes).map_err(decode_error);
-        (output, value)
-    })
-    .await;
+    let value = fairway_codec::decode::<T>(bytes)
+        .await
+        .map_err(decode_error);
     let result = async {
         let value = handler(value?).await?;
         output.write(value).await?;

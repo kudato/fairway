@@ -136,7 +136,7 @@ and custom implementations of these traits.
 
 For JSONL, read lines through `Reader::next_line` and decode each through `codec::decode`.
 Passing `Json(value)` to `Writer::write` writes one JSON record with a trailing `\n`.
-Conversions run in the compute pool.
+Conversions run through `codec::decode` and `codec::encode`.
 
 ```rust
 use std::{io, path::Path};
@@ -342,7 +342,7 @@ leaves the original file unchanged and starts removing the temporary file in the
 The temporary file may remain after a crash.
 
 Cancelling the wait for `fs::write`, `fs::edit`, or `finish` does not guarantee
-that saving already in progress stops. The lock is held until background work finishes.
+that saving already in progress stops. The lock is held until background file operations finish.
 Replacement may occur after cancellation, but only with a completely written file.
 
 ### Editing
@@ -481,13 +481,12 @@ and passes them to `T::decode(bytes)`.
 `write`, `Writer::write`, and `Editor::write` accept `V: Encode + Send + 'static`.
 `edit` uses `Decode` when reading and `Encode` when saving the handler's result.
 
-Trait methods are synchronous. `fs` runs them in the [fairway-compute](compute.md)
-pool and awaits their results asynchronously.
-The limit on conversions executing concurrently is shared by `fs` and `codec`.
+Trait methods are synchronous. `fs` calls them through `codec::decode` and `codec::encode`
+and follows the same [execution rules](codec.md#execution).
 
 When used through `fs`, the error types of `Decode` and `Encode` must implement
-`Into<Box<dyn std::error::Error + Send + Sync + 'static>>`.
-This is a requirement of filesystem operations, not of the codec traits.
+`Send` and `Into<Box<dyn std::error::Error + Send + Sync + 'static>>`.
+These are requirements of filesystem operations, not of the codec traits.
 
 `Reader` reads bytes or lines without parsing a format.
 Supported formats and custom conversions are described in [fairway-codec](codec.md).

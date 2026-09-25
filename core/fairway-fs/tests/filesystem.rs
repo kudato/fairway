@@ -307,38 +307,60 @@ async fn codecs_and_custom_anyhow_errors_work_through_fs() -> anyhow::Result<()>
     Ok(())
 }
 
-struct EncodeGate {
-    started: std::sync::Mutex<Option<oneshot::Sender<()>>>,
-    release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+struct ConversionGate {
+    started: oneshot::Sender<()>,
+    release: std::sync::mpsc::Receiver<()>,
+    finished: oneshot::Sender<()>,
 }
 
-impl Encode for EncodeGate {
+impl ConversionGate {
+    fn new() -> (
+        Self,
+        oneshot::Receiver<()>,
+        std::sync::mpsc::Sender<()>,
+        oneshot::Receiver<()>,
+    ) {
+        let (started, wait_started) = oneshot::channel();
+        let (release, wait_release) = std::sync::mpsc::channel();
+        let (finished, wait_finished) = oneshot::channel();
+        (
+            Self {
+                started,
+                release: wait_release,
+                finished,
+            },
+            wait_started,
+            release,
+            wait_finished,
+        )
+    }
+
+    fn wait(self) -> oneshot::Sender<()> {
+        let _ = self.started.send(());
+        // Dropping the sender also releases the worker if a test fails.
+        let _ = self.release.recv();
+        self.finished
+    }
+}
+
+impl Encode for ConversionGate {
     type Error = std::convert::Infallible;
+
     fn encode(self) -> Result<Vec<u8>, Self::Error> {
-        self.started
-            .lock()
-            .unwrap()
-            .take()
-            .unwrap()
-            .send(())
-            .unwrap();
-        self.release.lock().unwrap().recv().unwrap();
-        Ok(b"new".to_vec())
+        let finished = self.wait();
+        let bytes = b"cancelled".to_vec();
+        let _ = finished.send(());
+        Ok(bytes)
     }
 }
 
 #[tokio::test]
-async fn cancelled_encoding_keeps_the_file_locked_until_conversion_finishes() -> io::Result<()> {
+async fn cancelled_encoding_preserves_the_file_and_allows_later_writes() -> io::Result<()> {
     for whole_file in [false, true] {
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("data");
         std::fs::write(&path, "old")?;
-        let (started, receiver) = oneshot::channel();
-        let (release, wait) = std::sync::mpsc::channel();
-        let gated = EncodeGate {
-            started: std::sync::Mutex::new(Some(started)),
-            release: std::sync::Mutex::new(wait),
-        };
+        let (gated, started, release, finished) = ConversionGate::new();
         let task_path = path.clone();
         let task = tokio::spawn(async move {
             if whole_file {
@@ -349,46 +371,80 @@ async fn cancelled_encoding_keeps_the_file_locked_until_conversion_finishes() ->
                 output.finish().await
             }
         });
-        receiver.await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), started)
+            .await?
+            .unwrap();
         task.abort();
         assert!(task.await.unwrap_err().is_cancelled());
-        let busy = fs::writer(&path).await;
         release.send(()).unwrap();
-        assert!(matches!(busy, Err(error) if error.kind() == io::ErrorKind::WouldBlock));
-        let following = tokio::time::timeout(Duration::from_secs(5), fs::editor(&path)).await??;
-        assert_eq!(std::fs::read_to_string(&path)?, "old");
-        drop(following);
+        tokio::time::timeout(Duration::from_secs(5), finished)
+            .await?
+            .unwrap();
+        let mut following =
+            tokio::time::timeout(Duration::from_secs(5), fs::editor(&path)).await??;
+        assert_eq!(std::fs::read(&path)?, b"old");
+        following.write(b"following".to_vec()).await?;
+        following.finish().await?;
+        assert_eq!(std::fs::read(&path)?, b"following");
     }
     Ok(())
 }
 
 #[tokio::test]
-async fn cancelling_edit_during_decode_retains_lock_and_never_calls_the_handler() -> io::Result<()>
-{
-    type Gate = (oneshot::Sender<()>, std::sync::mpsc::Receiver<()>);
-    static GATE: std::sync::Mutex<Option<Gate>> = std::sync::Mutex::new(None);
-    struct Document;
+async fn cancelling_encoding_prevents_publication_of_earlier_chunks() -> io::Result<()> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("data");
+    std::fs::write(&path, "old")?;
+    let mut output = fs::writer(&path).await?;
+    output.write(b"partial".to_vec()).await?;
+    let (gated, started, release, finished) = ConversionGate::new();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::select! {
+            result = output.write(gated) => panic!("encoding finished before release: {result:?}"),
+            result = started => result.unwrap(),
+        }
+    })
+    .await?;
+    release.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), finished)
+        .await?
+        .unwrap();
+    assert!(output.write(b"more".to_vec()).await.is_err());
+    assert!(output.finish().await.is_err());
+    assert_eq!(std::fs::read(&path)?, b"old");
+    fs::write(&path, b"following".to_vec()).await?;
+    assert_eq!(std::fs::read(&path)?, b"following");
+    Ok(())
+}
+
+#[tokio::test]
+async fn cancelled_decoding_preserves_the_file_and_never_calls_the_handler() -> io::Result<()> {
+    static GATE: std::sync::Mutex<Option<ConversionGate>> = std::sync::Mutex::new(None);
+    struct Document(Option<oneshot::Sender<()>>);
     impl Decode for Document {
         type Error = std::convert::Infallible;
         fn decode(_: Vec<u8>) -> Result<Self, Self::Error> {
-            let (started, release) = GATE.lock().unwrap().take().unwrap();
-            started.send(()).unwrap();
-            release.recv().unwrap();
-            Ok(Self)
+            let gate = GATE.lock().unwrap().take().unwrap();
+            Ok(Self(Some(gate.wait())))
         }
     }
     impl Encode for Document {
         type Error = std::convert::Infallible;
         fn encode(self) -> Result<Vec<u8>, Self::Error> {
-            Ok(b"new".to_vec())
+            Ok(b"cancelled".to_vec())
+        }
+    }
+    impl Drop for Document {
+        fn drop(&mut self) {
+            // Wait for the decoded value to be discarded before checking the handler.
+            let _ = self.0.take().unwrap().send(());
         }
     }
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("data");
     std::fs::write(&path, "old")?;
-    let (started, receiver) = oneshot::channel();
-    let (release, wait) = std::sync::mpsc::channel();
-    *GATE.lock().unwrap() = Some((started, wait));
+    let (gated, started, release, finished) = ConversionGate::new();
+    *GATE.lock().unwrap() = Some(gated);
     let ran = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let handler_ran = ran.clone();
     let task_path = path.clone();
@@ -399,16 +455,21 @@ async fn cancelling_edit_during_decode_retains_lock_and_never_calls_the_handler(
         })
         .await
     });
-    receiver.await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), started)
+        .await?
+        .unwrap();
     task.abort();
     assert!(task.await.unwrap_err().is_cancelled());
-    let busy = fs::writer(&path).await;
     release.send(()).unwrap();
-    assert!(matches!(busy, Err(error) if error.kind() == io::ErrorKind::WouldBlock));
-    let following = tokio::time::timeout(Duration::from_secs(5), fs::editor(&path)).await??;
+    tokio::time::timeout(Duration::from_secs(5), finished)
+        .await?
+        .unwrap();
+    let mut following = tokio::time::timeout(Duration::from_secs(5), fs::editor(&path)).await??;
     assert!(!ran.load(std::sync::atomic::Ordering::SeqCst));
-    assert_eq!(std::fs::read_to_string(&path)?, "old");
-    drop(following);
+    assert_eq!(std::fs::read(&path)?, b"old");
+    following.write(b"following".to_vec()).await?;
+    following.finish().await?;
+    assert_eq!(std::fs::read(&path)?, b"following");
     Ok(())
 }
 

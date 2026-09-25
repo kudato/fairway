@@ -361,7 +361,6 @@ version = "0.0.2"
 dependencies = [
  "anyhow",
  "fairway-codec",
- "fairway-compute",
  "libc",
  "serde",
  "sha2",

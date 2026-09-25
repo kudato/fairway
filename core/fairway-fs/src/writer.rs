@@ -108,7 +108,7 @@ pub struct Writer {
 
 impl Drop for Writer {
     fn drop(&mut self) {
-        // Cancel queued work. A running compute or I/O job still owns State
+        // Cancel queued work. A running I/O job still owns State
         // and its lock until it ends, then removes the temporary output.
         if let Some(pending) = &self.pending {
             pending.abort();
@@ -216,31 +216,16 @@ impl Writer {
     pub async fn write<V>(&mut self, contents: V) -> io::Result<()>
     where
         V: Encode + Send + 'static,
-        V::Error: Into<BoxError>,
+        V::Error: Into<BoxError> + Send,
     {
         self.check()?;
         // Set before the first await. A dropped, started future leaves this set.
         self.poisoned = true;
         self.complete().await?;
-        let state = self.state.take().expect("idle writer");
-        self.pending = Some(tokio::spawn(async move {
-            // Keep the lock with the job across both CPU work and file I/O.
-            // Cancelling the caller never releases a still-running operation.
-            let (mut state, bytes) = fairway_compute::run(move || {
-                let bytes = contents.encode().map_err(super::encode_error);
-                (state, bytes)
-            })
-            .await;
-            match bytes {
-                Ok(bytes) => tokio::task::spawn_blocking(move || {
-                    let result = state.output().write_all(&bytes);
-                    (state, result)
-                })
-                .await
-                .expect("file writer worker did not complete"),
-                Err(error) => (state, Err(error)),
-            }
-        }));
+        let bytes = fairway_codec::encode(contents)
+            .await
+            .map_err(super::encode_error)?;
+        self.start(move |output| output.write_all(&bytes));
         self.complete().await?;
         self.poisoned = false;
         Ok(())
@@ -322,7 +307,7 @@ impl Editor {
     pub async fn write<V>(&mut self, contents: V) -> io::Result<()>
     where
         V: Encode + Send + 'static,
-        V::Error: Into<BoxError>,
+        V::Error: Into<BoxError> + Send,
     {
         self.output.write(contents).await
     }
