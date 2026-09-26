@@ -179,6 +179,54 @@ impl Encode for Invalid {
 }
 
 #[tokio::test]
+async fn readonly_files_reject_writes_before_encoding_or_editing() -> io::Result<()> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("readonly");
+    std::fs::write(&path, "old")?;
+    let permissions = std::fs::metadata(&path)?.permissions();
+    let mut readonly = permissions.clone();
+    readonly.set_readonly(true);
+    std::fs::set_permissions(&path, readonly)?;
+
+    // Privileged processes may still have write access; the OS decides.
+    let native = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&path);
+    if native.is_ok() {
+        std::fs::set_permissions(&path, permissions)?;
+        return Ok(());
+    }
+
+    let write = fs::write(&path, Invalid).await;
+    let mut handler_ran = false;
+    let edit = fs::edit(&path, |text: String| {
+        handler_ran = true;
+        async move { Ok::<_, io::Error>(text) }
+    })
+    .await;
+    let writer = fs::writer(&path).await.err();
+    let editor = fs::editor(&path).await.err();
+    let contents = fs::read::<String>(&path).await;
+    let entries = std::fs::read_dir(directory.path())?.count();
+    // Restore permissions before assertions so Windows can remove the fixture.
+    std::fs::set_permissions(&path, permissions)?;
+
+    assert_eq!(native.unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+    assert_eq!(write.unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+    assert_eq!(edit.unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+    assert_eq!(writer.unwrap().kind(), io::ErrorKind::PermissionDenied);
+    assert_eq!(editor.unwrap().kind(), io::ErrorKind::PermissionDenied);
+    assert!(!handler_ran);
+    assert_eq!(contents?, "old");
+    assert_eq!(entries, 1);
+
+    fs::write(&path, "after".to_owned()).await?;
+    assert_eq!(fs::read::<String>(&path).await?, "after");
+    Ok(())
+}
+
+#[tokio::test]
 async fn conversion_failures_preserve_original_and_poison_streaming_writes() -> io::Result<()> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("data");

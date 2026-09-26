@@ -57,7 +57,8 @@ pub(crate) fn open_original(path: &Path, required: bool) -> io::Result<Option<Fi
         return Ok(None);
     }
     let mut options = OpenOptions::new();
-    options.read(true);
+    // Require write access to the original even though publication replaces it.
+    options.read(true).write(true);
     no_follow(&mut options);
     let file = options.open(path)?;
     if !file.metadata()?.is_file() {
