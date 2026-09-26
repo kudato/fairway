@@ -11,6 +11,12 @@ use std::{
 use xattr::FileExt;
 
 #[cfg(target_os = "macos")]
+use std::{
+    fs::FileTimes,
+    os::macos::fs::{FileTimesExt, MetadataExt as _},
+};
+
+#[cfg(target_os = "macos")]
 pub(super) fn canonical_parent(path: &std::path::Path) -> io::Result<std::path::PathBuf> {
     use std::{
         ffi::CStr,
@@ -62,6 +68,15 @@ pub(super) fn lock_key(path: &std::path::Path) -> io::Result<std::path::PathBuf>
 
 pub(crate) fn copy_metadata(source: &File, target: &File) -> io::Result<()> {
     let before = source.metadata()?;
+    #[cfg(target_os = "macos")]
+    if before.st_flags()
+        & (libc::UF_IMMUTABLE | libc::UF_APPEND | libc::SF_IMMUTABLE | libc::SF_APPEND)
+        != 0
+    {
+        // These files cannot be replaced. Copying their protection would also
+        // prevent cleanup of the temporary file after the failed replacement.
+        return Err(io::Error::from_raw_os_error(libc::EPERM));
+    }
     let current = target.metadata()?;
     if (before.uid(), before.gid()) != (current.uid(), current.gid()) {
         // SAFETY: both descriptors are live and owned by this transaction.
@@ -86,6 +101,12 @@ pub(crate) fn copy_metadata(source: &File, target: &File) -> io::Result<()> {
         {
             return Err(io::Error::last_os_error());
         }
+        // Preserve creation time without restoring the old modification time.
+        target.set_times(FileTimes::new().set_created(before.created()?))?;
+        // SAFETY: the descriptor is live; flags come from the original file.
+        if unsafe { libc::fchflags(target.as_raw_fd(), before.st_flags()) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
     }
     // Linux POSIX ACLs are copied above as system.posix_acl_access. Verify mode
     // and ownership after ACL changes, which may also modify permission bits.
@@ -96,6 +117,12 @@ pub(crate) fn copy_metadata(source: &File, target: &File) -> io::Result<()> {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "could not preserve file ownership and permissions",
+        ));
+    }
+    #[cfg(target_os = "macos")]
+    if before.created()? != after.created()? || before.st_flags() != after.st_flags() {
+        return Err(io::Error::other(
+            "could not preserve file creation time and flags",
         ));
     }
     Ok(())

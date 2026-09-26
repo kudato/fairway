@@ -641,4 +641,74 @@ mod unix {
         assert_eq!(acl()?, before);
         Ok(())
     }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn macos_writes_and_edits_preserve_creation_time_and_flags() -> io::Result<()> {
+        use std::{
+            fs::{File, FileTimes},
+            os::macos::fs::{FileTimesExt, MetadataExt as _},
+            process::Command,
+            time::UNIX_EPOCH,
+        };
+        let directory = tempfile::tempdir()?;
+        let created = UNIX_EPOCH + Duration::new(1_500_000_000, 123_456_789);
+        let modified = UNIX_EPOCH + Duration::new(1_600_000_000, 987_654_321);
+        for editing in [false, true] {
+            let path = directory
+                .path()
+                .join(if editing { "edit" } else { "write" });
+            std::fs::write(&path, "old")?;
+            File::options()
+                .write(true)
+                .open(&path)?
+                .set_times(FileTimes::new().set_created(created).set_modified(modified))?;
+            let result = Command::new("chflags")
+                .arg("hidden,nodump")
+                .arg(&path)
+                .output()?;
+            assert!(result.status.success(), "{result:?}");
+            let before = std::fs::metadata(&path)?;
+            if editing {
+                fs::edit(&path, |text: String| async move {
+                    assert_eq!(text, "old");
+                    Ok::<_, io::Error>("new".to_owned())
+                })
+                .await?;
+            } else {
+                fs::write(&path, "new".to_owned()).await?;
+            }
+            let after = std::fs::metadata(&path)?;
+            assert_eq!(after.created()?, before.created()?);
+            assert_eq!(after.st_flags(), before.st_flags());
+            assert!(after.modified()? > before.modified()?);
+            assert_eq!(std::fs::read_to_string(&path)?, "new");
+        }
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn macos_protected_files_fail_without_leaking_temporaries() -> io::Result<()> {
+        use std::process::Command;
+        for flag in ["uchg", "uappnd"] {
+            let directory = tempfile::tempdir()?;
+            let path = directory.path().join("protected");
+            std::fs::write(&path, "old")?;
+            let result = Command::new("chflags").arg(flag).arg(&path).output()?;
+            assert!(result.status.success(), "{result:?}");
+            let result = fs::write(&path, "new".to_owned()).await;
+            let entries = std::fs::read_dir(directory.path())?.count();
+            // Clear protection even if a regression left a protected temporary file.
+            let cleanup = Command::new("chflags")
+                .args(["-R", "0"])
+                .arg(directory.path())
+                .output()?;
+            assert!(cleanup.status.success(), "{cleanup:?}");
+            assert_eq!(result.unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+            assert_eq!(std::fs::read_to_string(&path)?, "old");
+            assert_eq!(entries, 1);
+        }
+        Ok(())
+    }
 }
