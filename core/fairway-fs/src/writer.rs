@@ -171,7 +171,7 @@ impl Writer {
     fn check(&self) -> io::Result<()> {
         if self.poisoned {
             Err(io::Error::other(
-                "an earlier write failed or was cancelled; this result cannot be saved",
+                "an earlier operation failed or was cancelled; this result cannot be saved",
             ))
         } else {
             Ok(())
@@ -266,7 +266,7 @@ impl Writer {
     }
 }
 
-/// A locked original file and a separate writer for its replacement.
+/// A locked original file and a separate writer for its replacement. An error ends editing.
 pub struct Editor {
     input: Reader,
     output: Writer,
@@ -287,6 +287,7 @@ impl Editor {
     }
     /// Reads bytes from the original file. Read and write positions are independent.
     pub async fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        self.output.check()?;
         let result = self.input.read(buffer).await;
         if result.is_err() {
             self.output.poisoned = true;
@@ -296,6 +297,7 @@ impl Editor {
 
     /// Reads an original UTF-8 line without LF or CRLF, retaining partial input on cancellation.
     pub async fn next_line(&mut self) -> io::Result<Option<String>> {
+        self.output.check()?;
         let result = self.input.next_line().await;
         if result.is_err() {
             self.output.poisoned = true;

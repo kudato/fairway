@@ -2,13 +2,14 @@ use std::{io, path::Path};
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 
-/// An open file with a shared position for byte and line reads.
+/// An open file with a shared position for byte and line reads. An error ends reading.
 pub struct Reader {
     input: BufReader<tokio::fs::File>,
     // Kept on the reader, not on the next_line future, so cancellation cannot
     // lose bytes already consumed from the underlying file.
     line: Vec<u8>,
     replay: usize,
+    failed: bool,
 }
 
 /// Opens a file for sequential reading, following symbolic links and without a write lock.
@@ -23,11 +24,21 @@ impl Reader {
             input: BufReader::new(file),
             line: Vec::new(),
             replay: 0,
+            failed: false,
+        }
+    }
+
+    fn check(&self) -> io::Result<()> {
+        if self.failed {
+            Err(io::Error::other("an earlier error ended this reader"))
+        } else {
+            Ok(())
         }
     }
 
     /// Reads into the buffer, returning the number of bytes filled. Zero means EOF or an empty buffer.
     pub async fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        self.check()?;
         if buffer.is_empty() {
             return Ok(0);
         }
@@ -41,11 +52,24 @@ impl Reader {
             }
             return Ok(count);
         }
-        self.input.read(buffer).await
+        let result = self.input.read(buffer).await;
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
     }
 
     /// Reads UTF-8 through LF or CRLF, without the line ending. Cancellation retains pending bytes.
     pub async fn next_line(&mut self) -> io::Result<Option<String>> {
+        self.check()?;
+        let result = self.read_line().await;
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+
+    async fn read_line(&mut self) -> io::Result<Option<String>> {
         if self.replay != 0 {
             self.line.drain(..self.replay);
             self.replay = 0;

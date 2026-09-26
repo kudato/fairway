@@ -68,6 +68,21 @@ async fn lines_and_bytes_share_a_position_and_support_crlf_and_empty_lines() -> 
 }
 
 #[tokio::test]
+async fn reader_errors_end_reading() -> io::Result<()> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("lines");
+    fs::write(&path, b"\xff\nnext\n".to_vec()).await?;
+    let mut input = fs::reader(path).await?;
+    assert_eq!(
+        input.next_line().await.unwrap_err().kind(),
+        io::ErrorKind::InvalidData
+    );
+    assert!(input.next_line().await.is_err());
+    assert!(input.read(&mut [0; 4]).await.is_err());
+    Ok(())
+}
+
+#[tokio::test]
 async fn edits_wait_and_read_the_last_committed_version() -> io::Result<()> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("counter");
@@ -240,6 +255,7 @@ async fn conversion_failures_preserve_original_and_poison_streaming_writes() -> 
         output.write(Invalid).await.unwrap_err().kind(),
         io::ErrorKind::InvalidInput
     );
+    assert!(output.next_line().await.is_err());
     assert!(output.finish().await.is_err());
     assert_eq!(fs::read::<String>(&path).await?, "old");
     let error = fs::edit(&path, |_: String| async {
@@ -292,6 +308,7 @@ async fn editor_read_errors_prevent_replacement() -> io::Result<()> {
         editor.next_line().await.unwrap_err().kind(),
         io::ErrorKind::InvalidData
     );
+    assert!(editor.read(&mut [0; 1]).await.is_err());
     assert!(editor.finish().await.is_err());
     assert_eq!(fs::read::<Vec<u8>>(&path).await?, [0xff, b'\n']);
     Ok(())
