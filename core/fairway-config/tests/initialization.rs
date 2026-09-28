@@ -1,12 +1,14 @@
 //! Publication, concurrency, cancellation, and cached results in isolated processes.
 
 use std::{
+    future::{Future, poll_fn},
     path::Path,
     process::Command,
     sync::{
         Condvar, Mutex, OnceLock,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
+    task::Poll,
     time::Duration,
 };
 
@@ -104,22 +106,37 @@ async fn scenario(mode: &str, home: &Path) {
             assert_eq!(BETA.get().value, 20);
         }
         "success" | "cancel" => {
-            STARTED.set(tokio::sync::Notify::new()).unwrap();
-            config(home, "100");
-            let task = tokio::spawn(initialize());
-            tokio::time::timeout(Duration::from_secs(5), STARTED.get().unwrap().notified())
-                .await
-                .unwrap();
-            // Alpha is already deserialized. Neither namespace is published yet.
-            inaccessible();
             if mode == "cancel" {
-                task.abort();
-                assert!(task.await.unwrap_err().is_cancelled());
+                config(home, "10");
+                let (started, wait_started) = tokio::sync::oneshot::channel();
+                let (release, wait_release) = std::sync::mpsc::channel();
+                // Hold the only blocking worker so initialization must wait for file I/O.
+                let blocker = tokio::task::spawn_blocking(move || {
+                    let _ = started.send(());
+                    let _ = wait_release.recv();
+                });
+                wait_started.await.unwrap();
+                {
+                    let mut initialization = std::pin::pin!(initialize());
+                    let state = poll_fn(|cx| Poll::Ready(initialization.as_mut().poll(cx))).await;
+                    assert!(state.is_pending());
+                }
+                inaccessible();
+                assert_eq!(PREPARES.load(Ordering::SeqCst), 0);
                 config(home, "20");
-                release();
+                release.send(()).unwrap();
+                blocker.await.unwrap();
                 initialize().await.unwrap();
                 assert_eq!(BETA.get().value, 20);
             } else {
+                STARTED.set(tokio::sync::Notify::new()).unwrap();
+                config(home, "100");
+                let task = tokio::spawn(initialize());
+                tokio::time::timeout(Duration::from_secs(5), STARTED.get().unwrap().notified())
+                    .await
+                    .unwrap();
+                // Alpha is already deserialized. Neither namespace is published yet.
+                inaccessible();
                 let waiters: Vec<_> = (0..8).map(|_| tokio::spawn(initialize())).collect();
                 release();
                 task.await.unwrap().unwrap();
@@ -143,7 +160,15 @@ async fn scenario(mode: &str, home: &Path) {
 fn process_configuration() {
     if let Ok(mode) = std::env::var("FAIRWAY_CONFIG_TEST_MODE") {
         let home = std::path::PathBuf::from(std::env::var_os("FAIRWAY_HOME").unwrap());
-        let runtime = tokio::runtime::Builder::new_current_thread()
+        let mut builder = if mode == "success" {
+            // One worker pauses inline deserialization while the test checks publication.
+            tokio::runtime::Builder::new_multi_thread()
+        } else {
+            tokio::runtime::Builder::new_current_thread()
+        };
+        let runtime = builder
+            .worker_threads(2)
+            .max_blocking_threads(1)
             .enable_all()
             .build()
             .unwrap();

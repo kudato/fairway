@@ -1,17 +1,25 @@
-//! Public codec contracts, including chunk boundaries and error state transitions.
+//! Behavior of the built-in codecs: validation, error details, round trips,
+//! and Markdown traversal.
 
-use std::error::Error as _;
+use std::{convert::Infallible, error::Error as _};
 
-use fairway_codec::{Decode, Encode, Error, Json, Jsonl, Markdown, Toml};
+use fairway_codec::{Decode, Encode, Error, Json, Markdown, Toml};
 use serde::{Deserialize, Serialize};
 
 #[test]
 fn raw_data_is_owned_and_custom_errors_need_no_io_conversion() {
     assert_eq!(String::decode("кот".as_bytes().to_vec()).unwrap(), "кот");
     assert!(String::decode(vec![0xff]).is_err());
-    assert_eq!(Vec::<u8>::decode(vec![0, 255]).unwrap(), [0, 255]);
-    assert_eq!("hello".to_owned().encode().unwrap(), b"hello");
-    assert_eq!([0_u8, 255].encode().unwrap(), [0, 255]);
+    let bytes: Result<_, Infallible> = Vec::<u8>::decode(vec![0, 255]);
+    assert_eq!(bytes.unwrap(), [0, 255]);
+    let bytes: Result<_, Infallible> = vec![0_u8, 255].encode();
+    assert_eq!(bytes.unwrap(), [0, 255]);
+    let text: Result<_, Infallible> = "hello".to_owned().encode();
+    assert_eq!(text.unwrap(), b"hello");
+    let array: Result<_, Infallible> = [0_u8, 255].encode();
+    assert_eq!(array.unwrap(), [0, 255]);
+    let markdown: Result<_, Infallible> = Markdown::parse("# hello".to_owned()).encode();
+    assert_eq!(markdown.unwrap(), b"# hello");
 
     struct Custom;
     impl Decode for Custom {
@@ -21,30 +29,13 @@ fn raw_data_is_owned_and_custom_errors_need_no_io_conversion() {
         }
     }
     impl Encode for Custom {
-        type Error = u8;
+        type Error = &'static str;
         fn encode(self) -> Result<Vec<u8>, Self::Error> {
-            Err(8)
+            Err("custom encoding failed")
         }
     }
     assert!(matches!(Custom::decode(b"".to_vec()), Err(7)));
-    assert_eq!(Custom.encode(), Err(8));
-}
-
-#[test]
-fn only_conversions_that_pass_bytes_as_is_are_no_ops() {
-    const {
-        assert!(<Vec<u8> as Decode>::IS_NOOP);
-        assert!(!<String as Decode>::IS_NOOP);
-        assert!(!<Markdown as Decode>::IS_NOOP);
-        assert!(!<Json<Vec<u8>> as Decode>::IS_NOOP);
-        assert!(!<Toml<Dataset> as Decode>::IS_NOOP);
-        assert!(<Vec<u8> as Encode>::IS_NOOP);
-        assert!(<[u8; 2] as Encode>::IS_NOOP);
-        assert!(<String as Encode>::IS_NOOP);
-        assert!(<Markdown as Encode>::IS_NOOP);
-        assert!(!<Json<Vec<u8>> as Encode>::IS_NOOP);
-        assert!(!<Toml<Dataset> as Encode>::IS_NOOP);
-    }
+    assert_eq!(Custom.encode(), Err("custom encoding failed"));
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
@@ -99,80 +90,22 @@ fn format_errors_retain_format_position_and_source() {
 }
 
 #[test]
-fn jsonl_accepts_every_split_including_inside_utf8_and_crlf() {
-    let bytes = "\"кошка\"\r\n\"собака\"\n\"ёж\"".as_bytes();
-    for split in 0..=bytes.len() {
-        let mut parser = Jsonl::<String>::new();
-        let mut result = Vec::new();
-        for chunk in [&bytes[..split], &bytes[split..]] {
-            parser.push(chunk.to_vec()).unwrap();
-            while let Some(value) = parser.next().unwrap() {
-                result.push(value);
-            }
-        }
-        parser.finish();
-        parser.finish();
-        while let Some(value) = parser.next().unwrap() {
-            result.push(value);
-        }
-        assert_eq!(result, ["кошка", "собака", "ёж"], "split {split}");
-        assert!(parser.next().unwrap().is_none());
+fn parser_error_columns_count_bytes_after_non_ascii_text() {
+    let json = Json::<Vec<String>>::decode("\r\n[\"я\", ?]".as_bytes().to_vec()).unwrap_err();
+    let toml = Toml::<toml::Table>::decode("\r\n'я' = ?".as_bytes().to_vec()).unwrap_err();
+    assert!(json.source().unwrap().is::<serde_json::Error>());
+    assert!(toml.source().unwrap().is::<toml::de::Error>());
+    for (format, error) in [("json", json), ("toml", toml)] {
+        assert!(matches!(
+            error,
+            Error::Decode {
+                format: actual,
+                line: Some(2),
+                column: Some(8),
+                ..
+            } if actual == format
+        ));
     }
-}
-
-#[test]
-fn jsonl_errors_are_terminal_and_lines_are_global() {
-    let mut parser = Jsonl::<u32>::new();
-    parser.push(b"1\n".to_vec()).unwrap();
-    assert_eq!(parser.next().unwrap(), Some(1));
-    parser.push(b"2\ninvalid\n3\n".to_vec()).unwrap();
-    assert_eq!(parser.next().unwrap(), Some(2));
-    let error = parser.next().unwrap_err();
-    assert!(matches!(
-        error,
-        Error::Decode {
-            format: "jsonl",
-            line: Some(3),
-            column: Some(1),
-            ..
-        }
-    ));
-    assert!(parser.next().unwrap().is_none());
-    assert!(parser.push(b"4\n".to_vec()).is_err());
-    parser.finish();
-    assert!(parser.next().unwrap().is_none());
-}
-
-#[test]
-fn jsonl_empty_lines_bom_extra_values_and_invalid_utf8_are_errors() {
-    for invalid in [
-        b"\n".as_slice(),
-        b"\r\n",
-        b" \n",
-        b"1 2\n",
-        b"\xef\xbb\xbf1\n",
-        b"\"\xff\"\n",
-    ] {
-        let mut parser = Jsonl::<serde_json::Value>::new();
-        parser.push(invalid.to_vec()).unwrap();
-        assert!(parser.next().is_err(), "{invalid:?}");
-    }
-    let mut empty = Jsonl::<u32>::new();
-    empty.finish();
-    assert!(empty.next().unwrap().is_none());
-    assert!(empty.push(b"".to_vec()).is_err());
-}
-
-#[test]
-fn jsonl_needs_eof_for_an_unterminated_value() {
-    let mut parser = Jsonl::<u32>::new();
-    parser.push(b"12".to_vec()).unwrap();
-    assert!(parser.next().unwrap().is_none());
-    parser.push(b"3".to_vec()).unwrap();
-    assert!(parser.next().unwrap().is_none());
-    parser.finish();
-    assert_eq!(parser.next().unwrap(), Some(123));
-    assert!(parser.next().unwrap().is_none());
 }
 
 fn render(text: &str) -> String {
@@ -210,7 +143,8 @@ fn markdown_preserves_commonmark_structure() {
 fn markdown_traversals_are_independent_and_can_stop_early() {
     use fairway_codec::markdown::{Event, HeadingLevel, Tag};
 
-    // The definition comes after its use: all traversals must resolve it.
+    // The reference definition follows the link, so every traversal has to
+    // resolve it from the whole document.
     let source = "# Heading\n\n[link][id] and *emphasis*\n\n[id]: /target\n";
     let document = Markdown::parse(source.to_owned());
     let mut first = document.events();
@@ -272,7 +206,8 @@ fn markdown_encoding_does_not_reinterpret_text_as_structure() {
     ] {
         let document = Markdown::parse(text.to_owned());
         assert_eq!(document.as_ref(), text);
-        // Traversal may normalize text inside events, but never the source.
+        // Events may normalize the text they carry, but traversal must leave
+        // the stored source untouched.
         for event in document.events() {
             std::hint::black_box(event);
         }
@@ -285,7 +220,19 @@ fn ignored_json_fields_still_require_valid_utf8() {
     #[derive(Deserialize)]
     struct Empty {}
     assert!(Json::<Empty>::decode(b"{\"ignored\":\"\xff\"}".to_vec()).is_err());
-    let mut parser = Jsonl::<Empty>::new();
-    parser.push(b"{\"ignored\":\"\xff\"}\n".to_vec()).unwrap();
-    assert!(parser.next().is_err());
+}
+
+#[test]
+fn default_formats_and_construction_use_only_codec_api() {
+    use fairway_codec::{json, toml};
+    let mut value: Json = Json::decode(br#"{"name":"fairway"}"#.to_vec()).unwrap();
+    value.0["items"] = json!([1, 2]);
+    let value: Json = Json::decode(value.encode().unwrap()).unwrap();
+    assert_eq!(value.0["items"][1], 2);
+    let mut config: Toml = Toml::decode(b"name = 'fairway'".to_vec()).unwrap();
+    config.0["name"] = toml::Value::String("updated".into());
+    let config: Toml = Toml::decode(config.encode().unwrap()).unwrap();
+    assert_eq!(config.0["name"].as_str(), Some("updated"));
+    let table = toml! { count = 3 };
+    assert_eq!(table["count"].as_integer(), Some(3));
 }

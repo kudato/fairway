@@ -394,7 +394,7 @@ async fn errors_retain_sources_and_name_every_contributing_file() {
         error
             .source()
             .unwrap()
-            .downcast_ref::<io::Error>()
+            .downcast_ref::<fairway_fs::Error>()
             .unwrap()
             .kind(),
         io::ErrorKind::NotFound

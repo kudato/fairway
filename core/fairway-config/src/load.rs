@@ -5,7 +5,6 @@ use std::{
 };
 
 use fairway_codec::Toml;
-use fairway_compute as compute;
 use fairway_fs as fs;
 
 use crate::{
@@ -25,13 +24,13 @@ async fn load(home: &Path, namespaces: Vec<&'static Registration>) -> Result<Val
     let mut document = Document::default();
     let primary = home.join("config.toml");
     if let Some(table) = read(&primary, true).await? {
-        document = merge(document, table, primary, namespaces.clone()).await?;
+        document = merge(document, table, primary, &namespaces)?;
     }
     for path in additional(&home.join("conf.d")).await? {
         let table = read(&path, false).await?.expect("required file");
-        document = merge(document, table, path, namespaces.clone()).await?;
+        document = merge(document, table, path, &namespaces)?;
     }
-    compute::run(move || document.prepare(&namespaces)).await
+    document.prepare(&namespaces)
 }
 
 async fn read(path: &Path, optional: bool) -> Result<Option<toml::Table>, Error> {
@@ -121,11 +120,8 @@ async fn additional(root: &Path) -> Result<Vec<PathBuf>, Error> {
         }
     }
     // Path ordering compares components. All paths share the same conf.d prefix.
-    Ok(compute::run(move || {
-        paths.sort();
-        paths
-    })
-    .await)
+    paths.sort();
+    Ok(paths)
 }
 
 #[derive(Default)]
@@ -134,38 +130,35 @@ struct Document {
     sources: BTreeMap<&'static str, Vec<PathBuf>>,
 }
 
-async fn merge(
+fn merge(
     mut document: Document,
     mut table: toml::Table,
     path: PathBuf,
-    namespaces: Vec<&'static Registration>,
+    namespaces: &[&Registration],
 ) -> Result<Document, Error> {
-    compute::run(move || {
-        for namespace in namespaces {
-            if let Some(value) = table.remove(namespace.name) {
-                if !value.is_table() {
-                    return Err(Error::message(format!(
-                        "{}: configuration namespace {:?} must be a table",
-                        path.display(),
-                        namespace.name,
-                    )));
-                }
-                document
-                    .sources
-                    .entry(namespace.name)
-                    .or_default()
-                    .push(path.clone());
-                match document.tables.get_mut(namespace.name) {
-                    Some(previous) => overlay(previous, value),
-                    None => {
-                        document.tables.insert(namespace.name.to_owned(), value);
-                    }
+    for namespace in namespaces {
+        if let Some(value) = table.remove(namespace.name) {
+            if !value.is_table() {
+                return Err(Error::message(format!(
+                    "{}: configuration namespace {:?} must be a table",
+                    path.display(),
+                    namespace.name,
+                )));
+            }
+            document
+                .sources
+                .entry(namespace.name)
+                .or_default()
+                .push(path.clone());
+            match document.tables.get_mut(namespace.name) {
+                Some(previous) => overlay(previous, value),
+                None => {
+                    document.tables.insert(namespace.name.to_owned(), value);
                 }
             }
         }
-        Ok(document)
-    })
-    .await
+    }
+    Ok(document)
 }
 
 fn overlay(previous: &mut toml::Value, later: toml::Value) {

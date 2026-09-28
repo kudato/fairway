@@ -1,27 +1,36 @@
-//! Allocation regression checks run in their own single-test process.
-#![allow(unsafe_code)] // Instrument System only in this test binary.
+//! Checks that the owned codecs decode and encode a large input without
+//! copying it.
+//!
+//! The file holds a single test: the counting allocator sees every allocation
+//! in the process, so concurrent tests would distort the measurements.
+#![allow(unsafe_code)] // A global allocator can only be implemented with `unsafe`.
 
 use std::{
     alloc::{GlobalAlloc, Layout, System},
+    error::Error as _,
     sync::atomic::{AtomicUsize, Ordering::Relaxed},
 };
 
-use fairway_codec::{
-    self as codec, Decode, Decoder, Encode, Encoder, Jsonl, Markdown, StreamDecode, StreamEncode,
-};
+use fairway_codec::{Decode, Encode, Markdown};
 
 static LIVE: AtomicUsize = AtomicUsize::new(0);
 static PEAK: AtomicUsize = AtomicUsize::new(0);
 
+/// Counts live bytes and their peak on top of the system allocator.
 struct Counted;
 
+/// Records an allocation of `size` bytes and raises the peak if needed.
 fn allocated(size: usize) {
     let live = LIVE.fetch_add(size, Relaxed) + size;
     PEAK.fetch_max(live, Relaxed);
 }
 
+// SAFETY: every method forwards its arguments unchanged to `System`, so the
+// allocator keeps the `GlobalAlloc` contract. The counters are atomics and
+// never allocate.
 unsafe impl GlobalAlloc for Counted {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        // SAFETY: the caller upholds the contract of `alloc` for `layout`.
         let pointer = unsafe { System.alloc(layout) };
         if !pointer.is_null() {
             allocated(layout.size());
@@ -30,6 +39,7 @@ unsafe impl GlobalAlloc for Counted {
     }
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        // SAFETY: the caller upholds the contract of `alloc_zeroed` for `layout`.
         let pointer = unsafe { System.alloc_zeroed(layout) };
         if !pointer.is_null() {
             allocated(layout.size());
@@ -38,11 +48,15 @@ unsafe impl GlobalAlloc for Counted {
     }
 
     unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+        // SAFETY: `pointer` came from `System` through this allocator with
+        // `layout`, as the caller guarantees.
         unsafe { System.dealloc(pointer, layout) };
         LIVE.fetch_sub(layout.size(), Relaxed);
     }
 
     unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, size: usize) -> *mut u8 {
+        // SAFETY: `pointer` came from `System` through this allocator with
+        // `layout`, and the caller upholds the contract of `realloc` for `size`.
         let pointer = unsafe { System.realloc(pointer, layout, size) };
         if !pointer.is_null() {
             LIVE.fetch_sub(layout.size(), Relaxed);
@@ -55,17 +69,20 @@ unsafe impl GlobalAlloc for Counted {
 #[global_allocator]
 static ALLOCATOR: Counted = Counted;
 
+/// Resets the peak to the current live size and returns that size.
 fn mark() -> usize {
     let live = LIVE.load(Relaxed);
     PEAK.store(live, Relaxed);
     live
 }
 
+/// Returns how far the peak has risen above `before` since the last `mark`.
 fn peak_since(before: usize) -> usize {
     PEAK.load(Relaxed).saturating_sub(before)
 }
 
-// A full extra copy is 64 MiB; the allowance covers test-harness/pool bookkeeping.
+// A copy of the input would add 64 MiB; the allowance only covers test harness
+// bookkeeping.
 const SIZE: usize = 64 * 1024 * 1024;
 const ALLOWANCE: usize = 64 * 1024;
 
@@ -79,7 +96,7 @@ fn without_input_copy<T>(label: &str, input: Vec<u8>, run: impl FnOnce(Vec<u8>) 
 }
 
 #[test]
-fn owned_whole_document_and_stream_paths_do_not_allocate_another_input_buffer() {
+fn owned_documents_do_not_allocate_another_input_buffer() {
     let bytes = vec![b'x'; SIZE];
     let bytes = without_input_copy("bytes round trip", bytes, |bytes| {
         Vec::<u8>::decode(bytes).unwrap().encode().unwrap()
@@ -90,45 +107,10 @@ fn owned_whole_document_and_stream_paths_do_not_allocate_another_input_buffer() 
     let bytes = without_input_copy("Markdown round trip", bytes, |bytes| {
         Markdown::decode(bytes).unwrap().encode().unwrap()
     });
-    let bytes = without_input_copy("streamed document round trip", bytes, |bytes| {
-        let mut decoder = Decoder::<Markdown>::new();
-        decoder.push(bytes).unwrap();
-        decoder.finish().unwrap();
-        let document = decoder.next().unwrap().unwrap();
-        let mut bytes = Vec::new();
-        Encoder::<Markdown>::new()
-            .encode(document, &mut bytes)
-            .unwrap();
-        bytes
-    });
     assert_eq!(bytes.len(), SIZE);
     assert!(bytes.iter().all(|&byte| byte == b'x'));
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .build()
-        .unwrap();
-    // Initialize the shared compute pool before measuring codec allocations.
-    runtime
-        .block_on(codec::decode::<Markdown>(Vec::new()))
-        .unwrap();
-    let bytes = without_input_copy("async Markdown round trip", bytes, |bytes| {
-        runtime.block_on(async {
-            codec::encode(codec::decode::<Markdown>(bytes).await.unwrap())
-                .await
-                .unwrap()
-        })
-    });
     drop(bytes);
-
-    let mut chunk = vec![b' '; SIZE];
-    chunk[..2].copy_from_slice(b"1\n");
-    let mut jsonl = without_input_copy("JSONL chunk handoff", chunk, |chunk| {
-        let mut decoder = Jsonl::<u32>::new();
-        decoder.push(chunk).unwrap();
-        decoder
-    });
-    assert_eq!(jsonl.next().unwrap(), Some(1));
-    drop(jsonl);
 
     let before = LIVE.load(Relaxed);
     let mut invalid = vec![b'x'; SIZE];
@@ -136,6 +118,11 @@ fn owned_whole_document_and_stream_paths_do_not_allocate_another_input_buffer() 
     let error = without_input_copy("invalid UTF-8", invalid, |bytes| {
         String::decode(bytes).unwrap_err()
     });
-    assert_eq!(error.valid_up_to(), SIZE - 1);
+    let source = error
+        .source()
+        .unwrap()
+        .downcast_ref::<std::str::Utf8Error>()
+        .unwrap();
+    assert_eq!(source.valid_up_to(), SIZE - 1);
     assert!(LIVE.load(Relaxed).saturating_sub(before) <= ALLOWANCE);
 }

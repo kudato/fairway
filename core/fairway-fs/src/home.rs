@@ -1,18 +1,24 @@
 use std::{io, path::PathBuf, sync::OnceLock};
 
-static HOME: OnceLock<Result<PathBuf, (io::ErrorKind, String)>> = OnceLock::new();
+use crate::{Error, Operation};
 
-pub(crate) fn resolved() -> io::Result<PathBuf> {
-    match HOME.get_or_init(|| resolve().map_err(|error| (error.kind(), error.to_string()))) {
-        Ok(path) => Ok(path.clone()),
-        Err((kind, message)) => Err(io::Error::new(*kind, message.clone())),
-    }
+/// The Fairway directory, or the error that prevented determining it; set on
+/// first use and never changed afterwards.
+static HOME: OnceLock<Result<PathBuf, Error>> = OnceLock::new();
+
+/// Returns the Fairway directory, determining it on the first call.
+pub(crate) fn resolved() -> Result<PathBuf, Error> {
+    HOME.get_or_init(resolve).clone()
 }
 
-fn resolve() -> io::Result<PathBuf> {
+/// Determines the Fairway directory from `FAIRWAY_HOME` or the user's home
+/// directory.
+fn resolve() -> Result<PathBuf, Error> {
     let path = match std::env::var_os("FAIRWAY_HOME") {
         Some(value) if value.is_empty() => {
-            return Err(io::Error::new(
+            return Err(Error::message(
+                Operation::ResolveHome,
+                None,
                 io::ErrorKind::InvalidInput,
                 "FAIRWAY_HOME is empty",
             ));
@@ -20,7 +26,9 @@ fn resolve() -> io::Result<PathBuf> {
         Some(value) => PathBuf::from(value),
         None => std::env::home_dir()
             .ok_or_else(|| {
-                io::Error::new(
+                Error::message(
+                    Operation::ResolveHome,
+                    None,
                     io::ErrorKind::NotFound,
                     "cannot determine the user's home directory",
                 )
@@ -30,15 +38,53 @@ fn resolve() -> io::Result<PathBuf> {
     super::absolute(&path)
 }
 
-pub(crate) fn initialize() -> io::Result<()> {
+/// Implements [`crate::__private::initialize`].
+pub(crate) fn initialize() -> Result<(), Error> {
     let locks = resolved()?.join("locks");
-    if locks.try_exists()? {
-        super::lock::clean_stale(&locks)?;
+    if locks
+        .try_exists()
+        .map_err(|source| Error::io(Operation::Metadata, Some(&locks), source))?
+    {
+        super::lock::clean_stale(&locks)
+            .map_err(|cause| Error::new(Operation::Lock, Some(&locks), cause))?;
     }
     Ok(())
 }
 
-/// Returns the fixed Fairway home path without creating it.
-pub async fn home() -> io::Result<PathBuf> {
-    super::blocking(resolved).await
+/// Returns the path of the Fairway directory.
+///
+/// The Fairway directory holds Fairway's configuration and other state; a
+/// plugin can keep its own data in a subdirectory named after the plugin. The
+/// path is the value of the `FAIRWAY_HOME` environment variable, resolved
+/// against the working directory if it is relative, or `.fairway` in the
+/// user's home directory if the variable is not set. It is always absolute.
+///
+/// The path is determined once per process and does not change afterwards,
+/// even if the environment does. The directory itself is not created and may
+/// not exist yet; [`write`](crate::write) and [`edit`](crate::edit) create
+/// its `locks` subdirectory for their [locks](crate#locking).
+///
+/// # Errors
+///
+/// Returns an error of [`Operation::ResolveHome`] if `FAIRWAY_HOME` is set but
+/// empty ([`InvalidInput`](io::ErrorKind::InvalidInput)), or if it is not set
+/// and the user's home directory cannot be determined
+/// ([`NotFound`](io::ErrorKind::NotFound)). Because the path is determined
+/// only once, every later call returns the same error. Inside Fairway, `home`
+/// does not fail: Fairway determines the path at startup and does not start
+/// if it cannot.
+///
+/// # Examples
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() -> Result<(), fairway_fs::Error> {
+/// let data = fairway_fs::home().await?.join("my-plugin");
+/// fairway_fs::mkdir(&data).await?;
+/// fairway_fs::write(data.join("state.json"), "{}".to_owned()).await?;
+/// # Ok(())
+/// # }
+/// ```
+pub async fn home() -> Result<PathBuf, Error> {
+    super::blocking(Operation::ResolveHome, None, resolved).await
 }

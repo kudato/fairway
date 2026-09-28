@@ -16,7 +16,6 @@ workspace = true
 
 [dependencies]
 fairway-codec.workspace = true
-fairway-compute.workspace = true
 fairway-fs.workspace = true
 linkme.workspace = true
 serde.workspace = true

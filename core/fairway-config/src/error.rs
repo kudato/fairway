@@ -28,7 +28,7 @@ impl Error {
         }
     }
 
-    pub(crate) fn file(path: &Path, source: std::io::Error) -> Self {
+    pub(crate) fn file(path: &Path, source: fairway_fs::Error) -> Self {
         Self::caused_by(format!("could not load {}", path.display()), source)
     }
 }

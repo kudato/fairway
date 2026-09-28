@@ -1,4 +1,11 @@
-// All Windows handles and buffers stay owned for the duration of each call.
+//! The Windows steps: copying metadata, expanding 8.3 short names, and
+//! computing lock keys.
+//!
+//! Metadata is copied between open handles rather than paths, so that it
+//! cannot reach another file that has taken one of the paths in the meantime.
+
+// The Win32 functions called here have no safe wrappers in the standard
+// library.
 #![allow(unsafe_code)]
 
 use std::{
@@ -8,6 +15,8 @@ use std::{
     os::windows::io::{AsRawHandle, FromRawHandle},
     ptr,
 };
+
+use super::{Cause, Result};
 
 use windows_sys::Win32::{
     Foundation::{ERROR_SUCCESS, HANDLE, INVALID_HANDLE_VALUE, LocalFree},
@@ -26,21 +35,32 @@ use windows_sys::Win32::{
     },
 };
 
-pub(crate) fn copy_metadata(source: &File, target: &File) -> io::Result<()> {
+/// Gives `target` the extended attributes, alternate data streams, and
+/// property data of `source`, then its owner, group, and DACL, and last its
+/// file attributes, such as hidden and read-only.
+pub(crate) fn copy_metadata(source: &File, target: &File) -> Result<()> {
     copy_streams(source, target)?;
     copy_security(source, target)?;
-    target.set_permissions(source.metadata()?.permissions())
+    // On Windows, `Permissions` holds all the file attributes, not only the
+    // read-only one.
+    target
+        .set_permissions(source.metadata()?.permissions())
+        .map_err(Cause::from)
 }
 
-/// Expands existing 8.3 aliases without following the final symbolic link.
-/// The long leaf must be used for both locking and replacement: renaming onto
-/// an 8.3 spelling can otherwise replace the directory entry's long name.
-pub(crate) fn canonical_target(path: std::path::PathBuf) -> io::Result<std::path::PathBuf> {
+/// Replaces the 8.3 short names in `path` with the long names, without
+/// following a symbolic link at the end of the path.
+///
+/// The long name is needed both for the lock, so that all spellings of the
+/// target share one, and for the rename: renaming onto the short name would
+/// replace the file's long name with it. If the target does not exist yet,
+/// `path` is returned unchanged.
+pub(crate) fn canonical_target(path: std::path::PathBuf) -> Result<std::path::PathBuf> {
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
     use windows_sys::Win32::Storage::FileSystem::GetLongPathNameW;
     let mut source: Vec<u16> = path.as_os_str().encode_wide().collect();
     if source.contains(&0) {
-        return Err(io::Error::new(
+        return Err(Cause::Message(
             io::ErrorKind::InvalidInput,
             "path contains a null character",
         ));
@@ -48,17 +68,22 @@ pub(crate) fn canonical_target(path: std::path::PathBuf) -> io::Result<std::path
     source.push(0);
     let mut output = vec![0_u16; source.len() + 260];
     loop {
-        // SAFETY: terminated input and writable output of the specified length.
+        // SAFETY: `source` ends with a null character, and `output` has room
+        // for the number of characters passed with it.
         let length =
             unsafe { GetLongPathNameW(source.as_ptr(), output.as_mut_ptr(), output.len() as u32) };
         if length == 0 {
             let error = io::Error::last_os_error();
+            // A target that does not exist yet has no short name to expand.
             return if error.kind() == io::ErrorKind::NotFound {
                 Ok(path)
             } else {
-                Err(error)
+                Err(error.into())
             };
         }
+        // A result that fits is shorter than the buffer. Otherwise the call
+        // returns the size it needs, which can grow again before the retry if
+        // the file is renamed.
         if (length as usize) < output.len() {
             output.truncate(length as usize);
             return Ok(std::ffi::OsString::from_wide(&output).into());
@@ -67,7 +92,9 @@ pub(crate) fn canonical_target(path: std::path::PathBuf) -> io::Result<std::path
     }
 }
 
-pub(super) fn lock_key(path: &std::path::Path) -> io::Result<std::path::PathBuf> {
+/// Implements [`super::lock_key`]: unless the directory is case-sensitive, the
+/// file name is converted to upper case by the rules of the filesystem.
+pub(super) fn lock_key(path: &std::path::Path) -> Result<std::path::PathBuf> {
     use std::os::windows::fs::OpenOptionsExt;
     use windows_sys::Win32::Storage::FileSystem::{
         FILE_CASE_SENSITIVE_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_READ_ATTRIBUTES,
@@ -79,7 +106,8 @@ pub(super) fn lock_key(path: &std::path::Path) -> io::Result<std::path::PathBuf>
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
         .open(parent)?;
     let mut info = FILE_CASE_SENSITIVE_INFO::default();
-    // SAFETY: live directory handle and an output buffer of the documented size.
+    // SAFETY: `directory` keeps the handle open during the call, and `info` has
+    // the size passed with it.
     let success = unsafe {
         GetFileInformationByHandleEx(
             directory.as_raw_handle(),
@@ -90,25 +118,32 @@ pub(super) fn lock_key(path: &std::path::Path) -> io::Result<std::path::PathBuf>
     };
     if success == 0 {
         let error = io::Error::last_os_error();
-        // Older Windows/filesystems without this query use ordinary insensitive names.
+        // ERROR_INVALID_FUNCTION, ERROR_NOT_SUPPORTED, and
+        // ERROR_INVALID_PARAMETER mean that the Windows version or the
+        // filesystem does not support the query, and so has no case-sensitive
+        // directories.
         if !matches!(error.raw_os_error(), Some(1 | 50 | 87)) {
-            return Err(error);
+            return Err(error.into());
         }
     }
+    // FILE_CS_FLAG_CASE_SENSITIVE_DIR
     if info.Flags & 1 != 0 {
         return Ok(path.to_owned());
     }
     let name = path.file_name().expect("normalized target");
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
     use windows_sys::Win32::Globalization::{LCMAP_UPPERCASE, LCMapStringEx};
-    // Windows filesystem casing must preserve UTF-16 (including unpaired
-    // surrogates) and must not expand distinct names such as sharp s into SS.
-    // Invariant, non-linguistic Windows casing provides those semantics.
+    // Without LCMAP_LINGUISTIC_CASING, LCMapStringEx converts case by the rules
+    // of the filesystem, one UTF-16 unit at a time: unlike str::to_uppercase,
+    // it keeps unpaired surrogates and does not turn ß into SS, which is a
+    // different name.
     let source: Vec<u16> = name.encode_wide().collect();
     let length = i32::try_from(source.len())
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "file name is too long"))?;
+        .map_err(|_| Cause::Message(io::ErrorKind::InvalidInput, "file name is too long"))?;
     let locale = [0_u16]; // LOCALE_NAME_INVARIANT
-    // SAFETY: input and locale are live UTF-16 buffers with explicit lengths.
+    // SAFETY: `locale` ends with a null character, `source` has the length
+    // passed with it, and with a null output of size 0 the call only returns
+    // the size it needs.
     let required = unsafe {
         LCMapStringEx(
             locale.as_ptr(),
@@ -123,10 +158,11 @@ pub(super) fn lock_key(path: &std::path::Path) -> io::Result<std::path::PathBuf>
         )
     };
     if required == 0 {
-        return Err(io::Error::last_os_error());
+        return Err(io::Error::last_os_error().into());
     }
     let mut mapped = vec![0_u16; required as usize];
-    // SAFETY: output has the capacity returned by the same mapping query.
+    // SAFETY: as above, and `mapped` has room for the `required` units passed
+    // with it.
     let written = unsafe {
         LCMapStringEx(
             locale.as_ptr(),
@@ -141,12 +177,16 @@ pub(super) fn lock_key(path: &std::path::Path) -> io::Result<std::path::PathBuf>
         )
     };
     if written == 0 {
-        return Err(io::Error::last_os_error());
+        return Err(io::Error::last_os_error().into());
     }
     mapped.truncate(written as usize);
     Ok(parent.join(std::ffi::OsString::from_wide(&mapped)))
 }
 
+/// The owner, group, and DACL of a file.
+///
+/// They point into the security descriptor that GetSecurityInfo allocated,
+/// which is freed on drop.
 struct Security {
     descriptor: PSECURITY_DESCRIPTOR,
     owner: PSID,
@@ -155,15 +195,17 @@ struct Security {
 }
 
 impl Security {
-    fn read(file: &File) -> io::Result<Self> {
+    /// Reads the owner, group, and DACL of `file`.
+    fn read(file: &File) -> Result<Self> {
         let mut value = Self {
             descriptor: ptr::null_mut(),
             owner: ptr::null_mut(),
             group: ptr::null_mut(),
             dacl: ptr::null_mut(),
         };
-        // SAFETY: all out-pointers are initialized and valid; GetSecurityInfo
-        // allocates the descriptor and returns interior pointers into it.
+        // SAFETY: `file` keeps the handle open during the call, and the output
+        // arguments point to the fields of `value`. Dropping `value` frees the
+        // descriptor that the call allocates.
         let error = unsafe {
             GetSecurityInfo(
                 file.as_raw_handle(),
@@ -177,10 +219,10 @@ impl Security {
             )
         };
         if error != ERROR_SUCCESS {
-            return Err(io::Error::from_raw_os_error(error as i32));
+            return Err(io::Error::from_raw_os_error(error as i32).into());
         }
         if value.owner.is_null() || value.group.is_null() {
-            return Err(io::Error::new(
+            return Err(Cause::Message(
                 io::ErrorKind::InvalidData,
                 "file security descriptor has no owner or group",
             ));
@@ -191,44 +233,52 @@ impl Security {
 
 impl Drop for Security {
     fn drop(&mut self) {
-        // SAFETY: descriptor is null or the allocation returned by GetSecurityInfo.
+        // SAFETY: `descriptor` is either null, which LocalFree ignores, or the
+        // allocation returned by GetSecurityInfo, which is freed only here.
         unsafe {
             LocalFree(self.descriptor);
         }
     }
 }
 
-fn copy_security(source: &File, target: &File) -> io::Result<()> {
+/// Gives `target` the owner, group, and DACL of `source`, including whether
+/// the DACL inherits entries from the parent directory.
+fn copy_security(source: &File, target: &File) -> Result<()> {
     let source = Security::read(source)?;
     let current = Security::read(target)?;
     let mut information = DACL_SECURITY_INFORMATION;
     let mut access = READ_CONTROL | WRITE_DAC;
-    // Avoid requiring WRITE_OWNER when the newly created file already has the
-    // correct owner and group. Request it explicitly when a change is needed.
-    // SAFETY: these SID pointers are valid for the lifetime of their descriptors.
+    // Changing the owner or the group needs WRITE_OWNER access, which the
+    // process may not have, so they are set only if they differ.
+    // SAFETY: the SIDs point into the descriptors of `source` and `current`,
+    // which are alive.
     if unsafe { EqualSid(source.owner, current.owner) } == 0 {
         information |= OWNER_SECURITY_INFORMATION;
         access |= WRITE_OWNER;
     }
-    // SAFETY: as above, both group SIDs belong to live descriptors.
+    // SAFETY: as above.
     if unsafe { EqualSid(source.group, current.group) } == 0 {
         information |= GROUP_SECURITY_INFORMATION;
         access |= WRITE_OWNER;
     }
     let mut control = 0;
     let mut revision = 0;
-    // SAFETY: descriptor and out-pointers are valid.
+    // SAFETY: `source.descriptor` is a valid descriptor, and the output
+    // arguments point to local variables.
     if unsafe { GetSecurityDescriptorControl(source.descriptor, &mut control, &mut revision) } == 0
     {
-        return Err(io::Error::last_os_error());
+        return Err(io::Error::last_os_error().into());
     }
+    // Setting a DACL also sets whether it inherits entries from the parent
+    // directory, so pass on the original's choice.
     information |= if control & SE_DACL_PROTECTED != 0 {
         PROTECTED_DACL_SECURITY_INFORMATION
     } else {
         UNPROTECTED_DACL_SECURITY_INFORMATION
     };
     let writable = reopen(target, access)?;
-    // SAFETY: handle and security pointers remain live until the call returns.
+    // SAFETY: `writable` keeps the handle open during the call, and the SIDs
+    // and the DACL point into the descriptor of `source`, which is alive.
     let error = unsafe {
         SetSecurityInfo(
             writable.as_raw_handle(),
@@ -241,13 +291,17 @@ fn copy_security(source: &File, target: &File) -> io::Result<()> {
         )
     };
     if error != ERROR_SUCCESS {
-        return Err(io::Error::from_raw_os_error(error as i32));
+        return Err(io::Error::from_raw_os_error(error as i32).into());
     }
     Ok(())
 }
 
-fn reopen(file: &File, access: u32) -> io::Result<File> {
-    // SAFETY: file is a synchronous live handle; success returns a new owned handle.
+/// Opens a second handle to `file` with the `access` rights.
+///
+/// Unlike a duplicate, the new handle has its own file position and can have
+/// rights that the handle of `file` lacks.
+fn reopen(file: &File, access: u32) -> Result<File> {
+    // SAFETY: `file` keeps its handle open during the call.
     let handle = unsafe {
         ReOpenFile(
             file.as_raw_handle(),
@@ -257,23 +311,32 @@ fn reopen(file: &File, access: u32) -> io::Result<File> {
         )
     };
     if handle == INVALID_HANDLE_VALUE {
-        Err(io::Error::last_os_error())
+        Err(io::Error::last_os_error().into())
     } else {
-        // SAFETY: the successful ReOpenFile handle has a single Rust owner.
+        // SAFETY: the handle is new and open, nothing else owns it, and it is
+        // synchronous, as `File` requires, because no flags were passed.
         Ok(unsafe { File::from_raw_handle(handle) })
     }
 }
 
+/// A session of BackupRead or BackupWrite calls on a file, which read or write
+/// its data as a sequence of streams, each with a header.
 struct Backup<'a> {
     file: &'a File,
+    /// The state that Windows keeps between the calls of the session; null
+    /// before the first call.
     context: *mut c_void,
+    /// Whether the session writes; it decides which function frees `context`.
     writing: bool,
 }
 
 impl Backup<'_> {
-    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+    /// Reads the next bytes into `bytes` and returns their number, which can
+    /// be less than requested; 0 means that the file has no more streams.
+    fn read(&mut self, bytes: &mut [u8]) -> Result<usize> {
         let mut count = 0;
-        // SAFETY: synchronous handle, writable buffer, and persistent context pointer.
+        // SAFETY: `file` keeps the handle open, `bytes` has the length passed
+        // with it, and `context` belongs to this session.
         if unsafe {
             BackupRead(
                 self.file.as_raw_handle(),
@@ -286,16 +349,17 @@ impl Backup<'_> {
             )
         } == 0
         {
-            return Err(io::Error::last_os_error());
+            return Err(io::Error::last_os_error().into());
         }
         Ok(count as usize)
     }
 
-    fn read_exact(&mut self, mut bytes: &mut [u8]) -> io::Result<()> {
+    /// Fills `bytes`; running out of data first is an error.
+    fn read_exact(&mut self, mut bytes: &mut [u8]) -> Result<()> {
         while !bytes.is_empty() {
             let count = self.read(bytes)?;
             if count == 0 {
-                return Err(io::Error::new(
+                return Err(Cause::Message(
                     io::ErrorKind::UnexpectedEof,
                     "incomplete metadata stream",
                 ));
@@ -305,10 +369,12 @@ impl Backup<'_> {
         Ok(())
     }
 
-    fn write_all(&mut self, mut bytes: &[u8]) -> io::Result<()> {
+    /// Writes all of `bytes`.
+    fn write_all(&mut self, mut bytes: &[u8]) -> Result<()> {
         while !bytes.is_empty() {
             let mut count = 0;
-            // SAFETY: synchronous handle, readable buffer, and persistent context pointer.
+            // SAFETY: `file` keeps the handle open, `bytes` has the length
+            // passed with it, and `context` belongs to this session.
             if unsafe {
                 BackupWrite(
                     self.file.as_raw_handle(),
@@ -321,10 +387,10 @@ impl Backup<'_> {
                 )
             } == 0
             {
-                return Err(io::Error::last_os_error());
+                return Err(io::Error::last_os_error().into());
             }
             if count == 0 {
-                return Err(io::Error::new(
+                return Err(Cause::Message(
                     io::ErrorKind::WriteZero,
                     "incomplete metadata write",
                 ));
@@ -334,10 +400,13 @@ impl Backup<'_> {
         Ok(())
     }
 
-    fn skip(&mut self, count: u64) -> io::Result<()> {
+    /// Skips the next `count` bytes of the current stream without reading
+    /// them; the stream must have that many left.
+    fn skip(&mut self, count: u64) -> Result<()> {
         let mut low = 0;
         let mut high = 0;
-        // SAFETY: valid read context; skips the remaining payload of this stream.
+        // SAFETY: `file` keeps the handle open, the output arguments point to
+        // local variables, and `context` belongs to this reading session.
         if unsafe {
             BackupSeek(
                 self.file.as_raw_handle(),
@@ -349,10 +418,10 @@ impl Backup<'_> {
             )
         } == 0
         {
-            return Err(io::Error::last_os_error());
+            return Err(io::Error::last_os_error().into());
         }
         if (u64::from(high) << 32 | u64::from(low)) != count {
-            return Err(io::Error::new(
+            return Err(Cause::Message(
                 io::ErrorKind::UnexpectedEof,
                 "incomplete metadata stream",
             ));
@@ -364,7 +433,8 @@ impl Backup<'_> {
 impl Drop for Backup<'_> {
     fn drop(&mut self) {
         let mut count = 0;
-        // SAFETY: bAbort frees the context and ignores the handle and buffer.
+        // SAFETY: with bAbort set, the call only frees the context of this
+        // session and ignores the handle and the buffer.
         unsafe {
             if self.writing {
                 BackupWrite(
@@ -391,9 +461,15 @@ impl Drop for Backup<'_> {
     }
 }
 
-fn copy_streams(source: &File, target: &File) -> io::Result<()> {
-    // Separate handles avoid changing the editor's read position. Primary file
-    // data is skipped by BackupSeek rather than copied a second time.
+/// Copies the extended attributes, alternate data streams, and property data
+/// of `source` to `target`.
+///
+/// The other streams, such as the old contents and the object ID, are skipped
+/// without being read. The security descriptor is not among the streams read;
+/// [`copy_security`] copies it.
+fn copy_streams(source: &File, target: &File) -> Result<()> {
+    // Work through handles of their own, so that the file positions of
+    // `source` and `target` do not move.
     let source = reopen(source, FILE_GENERIC_READ)?;
     let target = reopen(target, FILE_GENERIC_READ | FILE_GENERIC_WRITE)?;
     let mut input = Backup {
@@ -408,8 +484,9 @@ fn copy_streams(source: &File, target: &File) -> io::Result<()> {
     };
     let mut buffer = vec![0; 64 * 1024];
     loop {
-        // WIN32_STREAM_ID's fixed wire header ends before cStreamName at byte 20,
-        // independently of the struct's trailing alignment padding.
+        // Each stream starts with a WIN32_STREAM_ID header: 20 bytes followed
+        // by the stream name. The header is parsed from bytes, because the
+        // struct is padded to 24 bytes.
         let mut header = [0_u8; 20];
         let count = input.read(&mut header)?;
         if count == 0 {
@@ -419,8 +496,10 @@ fn copy_streams(source: &File, target: &File) -> io::Result<()> {
         let id = u32::from_le_bytes(header[0..4].try_into().expect("stream id"));
         let mut remaining = u64::from_le_bytes(header[8..16].try_into().expect("stream size"));
         let name_len = u32::from_le_bytes(header[16..20].try_into().expect("name size")) as usize;
+        // Stream names take at most a few hundred bytes; a larger size means
+        // corrupt data and must not cause a huge allocation.
         if name_len > 64 * 1024 {
-            return Err(io::Error::new(
+            return Err(Cause::Message(
                 io::ErrorKind::InvalidData,
                 "metadata stream name is too long",
             ));
