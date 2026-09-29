@@ -133,6 +133,7 @@ impl Transaction {
         // another program may have replaced it with a symbolic link, and the
         // rename would replace the link instead of the file.
         super::platform::check_target(&self.target, false)?;
+        drop(self.original.take());
         drop(self.output.take());
         std::fs::rename(self.temp.as_ref().expect("temporary path"), &self.target)
             .map_err(|source| Error::io(Operation::Replace, Some(&self.target), source))
