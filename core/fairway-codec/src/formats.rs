@@ -109,8 +109,8 @@ impl<T: Serialize> Encode for Json<T> {
 
 /// A TOML document deserialized into `T`.
 ///
-/// `T` defaults to [`toml::Value`](crate::toml::Value), which holds a document
-/// of any structure. Decoding requires `T` to implement
+/// `T` defaults to [`toml::Value`], which holds a document of any structure.
+/// Decoding requires `T` to implement
 /// [`Deserialize`](trait@serde::Deserialize), and encoding requires
 /// [`Serialize`](trait@Serialize). References implement `Serialize` too, so
 /// `Toml(&value).encode()` serializes `value` without taking it.

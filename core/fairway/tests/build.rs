@@ -84,15 +84,15 @@ plugin-b = {{ path = "../plugin-b" }}
 "#
             ),
         );
-        let main = fs::read_to_string(fairway.join("src/main.rs")).unwrap();
-        fixture.write(
-            "app/src/main.rs",
-            &format!("{main}\nuse plugin_a as _;\nuse plugin_b as _;\n"),
-        );
-        for module in ["app.rs", "signal.rs"] {
+        for module in ["main.rs", "app.rs", "signal.rs"] {
             let source = fs::read_to_string(fairway.join("src").join(module)).unwrap();
             fixture.write(&format!("app/src/{module}"), &source);
         }
+        // The fixture's plugins replace the ones linked into the application.
+        fixture.write(
+            "app/src/plugins.rs",
+            "use plugin_a as _;\nuse plugin_b as _;\n",
+        );
         // Keep the fixture's dependencies aligned with the workspace.
         fs::copy(
             core.parent().unwrap().join("Cargo.lock"),

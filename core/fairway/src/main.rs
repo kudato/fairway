@@ -3,6 +3,7 @@
 //! Core libraries provide their own APIs; Fairway coordinates their execution.
 
 mod app;
+mod plugins;
 mod signal;
 
 use std::process::ExitCode;

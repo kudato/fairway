@@ -60,15 +60,11 @@ fn cli_guides() {
         fs::write(src.join("lib.rs"), library).unwrap();
 
         // Reuse the actual application so transcripts also exercise startup and exit codes.
-        let main = fs::read_to_string(fairway.join("src/main.rs")).unwrap();
-        fs::write(
-            src.join("main.rs"),
-            format!("{main}\nuse fairway_cli_docs as _;\n"),
-        )
-        .unwrap();
-        for module in ["app.rs", "signal.rs"] {
+        // The guide's examples replace the plugins linked into the application.
+        for module in ["main.rs", "app.rs", "signal.rs"] {
             fs::copy(fairway.join("src").join(module), src.join(module)).unwrap();
         }
+        fs::write(src.join("plugins.rs"), "use fairway_cli_docs as _;\n").unwrap();
         fs::write(
             directory.path().join("Cargo.toml"),
             format!(
@@ -80,6 +76,11 @@ name = "fairway-cli-docs"
 version = "{version}"
 edition = "2024"
 description = "CLI documentation examples"
+
+# Help output shows the binary name, as it does for the real application.
+[[bin]]
+name = "fairway"
+path = "src/main.rs"
 
 [dependencies]
 fairway-cli = {{ path = {cli:?} }}
@@ -113,7 +114,7 @@ axum = {{ version = "0.8", default-features = false, features = ["http1", "tokio
 
         let binary = target
             .join("debug")
-            .join(format!("fairway-cli-docs{}", std::env::consts::EXE_SUFFIX));
+            .join(format!("fairway{}", std::env::consts::EXE_SUFFIX));
         trycmd::TestCases::new()
             .env(
                 "FAIRWAY_HOME",
