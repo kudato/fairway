@@ -49,10 +49,10 @@ pub async fn mkdir(path: impl AsRef<Path>) -> Result<(), Error> {
 ///
 /// # Errors
 ///
-/// Returns the errors of [`metadata`], except that
-/// [`NotFound`](io::ErrorKind::NotFound) gives `Ok(false)`. For example, the
-/// error is [`PermissionDenied`](io::ErrorKind::PermissionDenied) if a parent
-/// directory may not be searched.
+/// Returns an error if `path` cannot be resolved or checked, for example
+/// [`NotFound`](io::ErrorKind::NotFound) if `path` is empty, or
+/// [`PermissionDenied`](io::ErrorKind::PermissionDenied) if a parent directory
+/// may not be searched. A missing target gives `Ok(false)`.
 ///
 /// # Examples
 ///
@@ -71,7 +71,12 @@ pub async fn mkdir(path: impl AsRef<Path>) -> Result<(), Error> {
 pub async fn exists(path: impl AsRef<Path>) -> Result<bool, Error> {
     match metadata(path).await {
         Ok(_) => Ok(true),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error)
+            if error.operation() == Operation::Metadata
+                && error.kind() == io::ErrorKind::NotFound =>
+        {
+            Ok(false)
+        }
         Err(error) => Err(error),
     }
 }

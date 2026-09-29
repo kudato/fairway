@@ -1,76 +1,63 @@
-# Кодек
+# fairway-codec
 
-`fairway-codec` разбирает текст и байты в памяти и кодирует значения обратно в байты.
+Преобразования между целыми буферами байтов и значениями Rust.
+
+Крейт превращает байты в значения Rust и обратно: текст, JSON, TOML
+и Markdown. Откуда берутся байты, он не знает: источники и приёмники данных
+реализуют другие крейты. Например, [fairway-fs](fs.md) читает и записывает
+файлы в тех же форматах. Напрямую `fairway-codec` нужен для данных в памяти,
+например полученных по сети, и для собственных форматов.
+
+Зависимости плагина:
+
+```toml
+[dependencies]
+fairway-codec.workspace = true
+```
 
 ## Быстрый старт
 
-`decode(data).await` разбирает данные в указанном типе, `encode(value).await`
-кодирует значение в `Vec<u8>`. Тип значения задаёт формат: например,
-`Json<Vec<String>>` — JSON-массив строк.
-
-Обе функции выполняют преобразование в вычислительном пуле Fairway.
-Преобразование, которое передаёт байты как есть (`IS_NOOP`), например
-декодирование в `Vec<u8>`, выполняется на месте.
-Декодирование получает `Vec<u8>` во владение; кодирование потребляет значение
-и возвращает собственный буфер. Контракт одинаков для данных из файлов,
-процессов, сети и памяти. Если исходник нужно оставить у вызывающего кода,
-сделайте копию явно перед преобразованием.
-
-```rust
-use fairway_codec::{self as codec, Json};
-
-async fn encode_words() -> Result<Vec<u8>, codec::Error> {
-    let words: Json<Vec<String>> = codec::decode(r#"["кошка", "собака"]"#.as_bytes().to_vec()).await?;
-    codec::encode(words).await
-}
-```
-
-## Синхронное преобразование
-
-Методы трейтов `Decode` и `Encode` выполняются на вызывающем потоке.
-Они подходят для коротких операций и вызова одного кодека внутри другого.
+`Decode::decode` разбирает байты в значение указанного типа, `Encode::encode`
+превращает значение в байты. Формат определяется типом: `Json<Vec<String>>` —
+это JSON-массив строк.
 
 ```rust
 use fairway_codec::{self as codec, Decode, Encode, Json};
 
-fn encode_three_numbers() -> Result<Vec<u8>, codec::Error> {
-    let numbers: Json<Vec<u64>> = Json::decode(b"[10, 20, 30]".to_vec())?;
-    numbers.encode()
+fn add_word(input: Vec<u8>) -> Result<Vec<u8>, codec::Error> {
+    let Json(mut words): Json<Vec<String>> = Json::decode(input)?;
+    words.push("mouse".to_owned());
+    Json(words).encode()
 }
 ```
 
-Длительные преобразования вызывайте через `codec::decode` или `codec::encode`.
-Серия коротких синхронных вызовов также занимает поток до завершения всей серии.
+- Оба метода работают с буфером целиком.
+- Вход они забирают во владение и могут переиспользовать его память вместо
+  копирования. Если исходные данные ещё понадобятся, сделайте копию заранее.
+- Преобразование синхронное и выполняется в вызывающем потоке. Когда файл
+  читает или записывает `fairway-fs`, преобразование выполняется в отдельном
+  потоке блокирующих операций. Если вы разбираете большие данные прямо
+  в асинхронной задаче, вынесите работу в `tokio::task::spawn_blocking`, чтобы
+  не задерживать другие задачи.
 
-## Переход на владение входом
+## Встроенные форматы
 
-`Decode::decode` и `codec::decode` теперь принимают `Vec<u8>`. `Encode::encode`
-принимает `self` и возвращает `Vec<u8>` вместо `Cow<[u8]>`; `.into_owned()` больше
-не нужен. Собственные кодеки должны обновить эти сигнатуры. Отдельных методов
-`decode_owned` и `encode_owned` нет.
+| Тип | Разбор | Кодирование |
+|---|---|---|
+| `Vec<u8>` | байты как есть | байты как есть |
+| `String` | проверяет UTF-8 без копирования | байты строки без копирования |
+| `[u8; N]` | — | копирует массив |
+| `Json<T>` | один JSON-документ | компактный JSON и перевод строки |
+| `Toml<T>` | документ TOML | TOML без исходных комментариев и оформления |
+| `Markdown` | проверяет UTF-8 и хранит текст | исходный текст байт в байт |
 
-Потоковые операции следуют тому же правилу: `push` потребляет каждый `Vec<u8>`,
-а `StreamEncode::encode` — каждое значение. `Markdown::parse` потребляет `String`.
-Если значение нужно сохранить, клонируйте его в месте вызова. Для чтения исходника
-Markdown без потребления документа используйте `document.as_ref()`.
+## JSON и TOML
 
-## Форматы целого документа
-
-### JSON и TOML
-
-`Json<T>` и `Toml<T>` содержат разобранное значение `T`.
-Метод `into_inner` извлекает его для изменения. Для обратного кодирования
-оберните изменённое значение в `Json` или `Toml`.
-
-Например, описание датасета в TOML:
-
-```toml
-name = "documents"
-files = ["part-01.jsonl"]
-```
+`Json<T>` и `Toml<T>` — обёртки над значением, которое реализует `serde`.
+Если структура данных известна, опишите её типом:
 
 ```rust
-use fairway_codec::{self as codec, Toml};
+use fairway_codec::{self as codec, Decode, Encode, Toml};
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize)]
@@ -79,182 +66,146 @@ struct Dataset {
     files: Vec<String>,
 }
 
-async fn add_part(input: String) -> Result<Vec<u8>, codec::Error> {
-    let dataset: Toml<Dataset> = codec::decode(input.into_bytes()).await?;
-    let mut dataset = dataset.into_inner();
-    dataset.files.push("part-02.jsonl".into());
-    codec::encode(Toml(dataset)).await
+fn add_part(input: Vec<u8>) -> Result<Vec<u8>, codec::Error> {
+    let Toml(mut dataset): Toml<Dataset> = Toml::decode(input)?;
+    dataset.files.push("part-02.jsonl".to_owned());
+    Toml(dataset).encode()
 }
 ```
 
-### Markdown
-
-`Markdown` хранит исходный текст документа. Метод `events` создаёт итератор
-по его элементам: тексту, началу и концу заголовка, абзаца, списка и других
-конструкций. Общий список событий не создаётся и не кешируется.
-`encode` потребляет документ и возвращает его исходный буфер байтов без изменений и разбора.
+Без параметра используется универсальное значение `json::Value`
+или `toml::Value`. Макросы `json!` и `toml!` создают такие значения
+без прямой зависимости от `serde_json` и `toml`.
 
 ```rust
-use fairway_codec::{self as codec, Markdown, markdown::Event};
+use fairway_codec::{self as codec, Decode, Encode, Json, json};
 
-async fn inspect_markdown(input: String) -> anyhow::Result<Vec<u8>> {
-    let document: Markdown = codec::decode(input.into_bytes()).await?;
+fn version(input: Vec<u8>) -> Result<Option<String>, codec::Error> {
+    let Json(document): Json = Json::decode(input)?;
+    Ok(document["version"].as_str().map(str::to_owned))
+}
+
+fn status(name: &str, ready: bool) -> Result<Vec<u8>, codec::Error> {
+    Json(json!({ "name": name, "ready": ready })).encode()
+}
+```
+
+- JSON кодируется компактно, с переводом строки в конце. При разборе после
+  значения допустимы только пробельные символы, а некорректный UTF-8
+  отклоняется во всём входе, даже в полях, которые тип пропускает.
+- Верхний уровень документа TOML — всегда таблица, поэтому `T` обычно
+  структура или словарь.
+- При кодировании TOML теряются комментарии, пустые строки и исходное
+  оформление. Чтобы сохранить их, меняйте документ как `String`.
+- Чтобы закодировать значение, не отдавая его, передайте ссылку:
+  `Json(&value).encode()`.
+
+## Markdown
+
+`Markdown` хранит исходный текст документа. `events()` разбирает его
+в последовательность событий: начало и конец заголовка, абзаца, списка,
+фрагменты текста и так далее. Типы событий находятся в `codec::markdown`,
+это типы [pulldown-cmark](https://docs.rs/pulldown-cmark).
+
+```rust
+use fairway_codec::{Markdown, markdown::{Event, HeadingLevel, Tag, TagEnd}};
+
+fn titles(document: &Markdown) -> Vec<String> {
+    let mut titles = Vec::new();
+    let mut current = None;
     for event in document.events() {
-        if let Event::Text(text) = event {
-            println!("{text}");
+        match event {
+            Event::Start(Tag::Heading { level: HeadingLevel::H1, .. }) => {
+                current = Some(String::new());
+            }
+            Event::Text(text) | Event::Code(text) => {
+                if let Some(title) = &mut current {
+                    title.push_str(&text);
+                }
+            }
+            Event::SoftBreak | Event::HardBreak => {
+                if let Some(title) = &mut current {
+                    title.push(' ');
+                }
+            }
+            Event::End(TagEnd::Heading(HeadingLevel::H1)) => {
+                titles.extend(current.take());
+            }
+            _ => {}
         }
     }
-    Ok(codec::encode(document).await?)
+    titles
+}
+
+fn main() {
+    let document = Markdown::parse("# Intro\n\nText.\n\n# Use `fairway`\n".to_owned());
+    assert_eq!(titles(&document), ["Intro", "Use fairway"]);
+
+    for source in ["First\nsecond\n===\n", "First  \nsecond\n===\n"] {
+        let document = Markdown::parse(source.to_owned());
+        assert_eq!(titles(&document), ["First second"]);
+    }
 }
 ```
 
-Кодирование побайтово сохраняет отступы, маркеры, экранирование и переносы строк.
-Каждый вызов `events()` запускает новый разбор. Сам парсер выделяет рабочую
-память: итератор не означает обработку с постоянным расходом памяти.
+- Поддерживается CommonMark без расширений: таблицы, сноски, зачёркивание,
+  списки задач и front matter не распознаются.
+- `encode` возвращает исходный текст байт в байт, поэтому разбор
+  и кодирование никогда не меняют документ.
+- Каждый вызов `events()` разбирает документ заново, синхронно в вызывающем
+  потоке. Если события нужны несколько раз, соберите их в вектор.
+- События по возможности заимствуют текст документа. Чтобы сохранить их
+  дольше, чем живёт документ, преобразуйте их через `Event::into_static`.
+- События доступны только для чтения. Чтобы изменить документ, соберите
+  новый текст и оберните его через `Markdown::parse`.
 
-Создание и обход итератора синхронны и выполняются на вызывающем потоке.
-`codec::decode::<Markdown>().await` только сохраняет текст после проверки UTF-8;
-последующий обход не переносится в вычислительный пул автоматически.
-Для больших документов выполняйте весь анализ внутри `Decode` собственного
-типа и вызывайте его через `codec::decode`, как описано в разделе
-[«Собственные типы»](#собственные-типы).
+## Ошибки
 
-При необходимости сохраните события явно:
+Встроенные форматы, которые могут не справиться с данными, возвращают
+`codec::Error`:
 
-```rust
-use fairway_codec::Markdown;
+- `Decode { format, line, column, source }` — данные не удалось разобрать;
+- `Encode { format, source }` — значение не удалось закодировать.
 
-let document = Markdown::parse("# Заголовок\n".to_owned());
-let events: Vec<_> = document.events().collect();
-assert_eq!(events.len(), 3);
+`format` — это `"text"` (для `String`), `"json"`, `"toml"` или `"markdown"`.
+`line` и `column` отсчитываются от 1 и заполняются, если позиция известна;
+столбец считается в байтах. Для некорректного UTF-8 это позиция первого
+неверного байта. Ошибка парсера доступна в `source`.
 
-// Такие события можно использовать и после удаления документа.
-let owned: Vec<_> = document.events().map(|event| event.into_static()).collect();
-drop(events);
-drop(document);
-assert_eq!(owned.len(), 3);
-```
-
-Это изменение API: раньше `events()` возвращал срез `&[Event<'static>]`,
-теперь — итератор со значениями `Event<'_>`, которые могут заимствовать текст
-документа. Для подсчёта используйте `.count()` вместо `.len()`, для индексации
-или повторного использования готовых событий — явно собранный `Vec`.
-Вызов `.iter()` перед обходом больше не нужен. Сбор полного списка вновь
-требует памяти под все события.
-
-## Потоковая обработка
-
-### JSONL
-
-`Jsonl<T>` разбирает и кодирует последовательность JSON-значений, по одному на строку.
-Его методы синхронные. Для обработки партии записей в пуле их можно вызвать
-внутри собственной реализации `Decode` или `Encode`.
-
-#### Разбор JSONL
-
-`push` получает порцию байтов `Vec<u8>` во владение. После каждой порции вызывайте `next` до `None`,
-чтобы получить все доступные записи.
-Порция может заканчиваться внутри строки или многобайтового символа UTF-8.
-
-Когда все байты переданы, вызовите `finish` и снова читайте через `next` до `None`.
-Так будет разобрана и последняя строка без завершающего `\n`.
+Форматы, которые не могут завершиться ошибкой, используют тип ошибки
+`Infallible`. Результат такого преобразования можно получить без `unwrap`:
 
 ```rust
-use fairway_codec::{self as codec, Jsonl};
+use fairway_codec::Encode;
 
-fn main() -> Result<(), codec::Error> {
-    let input = "\"кошка\"\n\"собака\"";
-    let mut words = Jsonl::<String>::new();
-
-    for chunk in input.as_bytes().chunks(5) {
-        words.push(chunk.to_vec())?;
-        while let Some(word) = words.next()? {
-            println!("{word}");
-        }
-    }
-
-    words.finish();
-    while let Some(word) = words.next()? {
-        println!("{word}");
-    }
-    Ok(())
-}
+let Ok(bytes) = "text".to_owned().encode();
+assert_eq!(bytes, b"text");
 ```
 
-#### Кодирование в JSONL
+Когда файл читают и записывают через `fairway-fs`, ошибка разбора становится
+источником `fs::Error` вида `InvalidData`, а ошибка кодирования — вида
+`InvalidInput`.
 
-`StreamEncode::encode` добавляет JSON-представление записи и завершающий `\n`
-в выходной буфер, потребляя запись. После передачи байтов потребителю буфер
-можно очистить для следующей записи. Память пустого буфера может быть заменена.
+## Собственный формат
 
-```rust
-use fairway_codec::{self as codec, Jsonl, StreamEncode};
+Чтобы преобразовывать свой формат и использовать его в `fairway-fs`,
+реализуйте для своего типа `Decode` и `Encode`. Внутри удобно пользоваться
+встроенными форматами.
 
-fn encode_words(words: Vec<String>) -> Result<Vec<u8>, codec::Error> {
-    let mut encoder = Jsonl::<String>::new();
-    let mut bytes = Vec::new();
-    for word in words {
-        encoder.encode(word, &mut bytes)?;
-    }
-    StreamEncode::finish(&mut encoder, &mut bytes)?;
-    Ok(bytes)
-}
-```
-
-`StreamEncode::finish` завершает кодирование. Отправка оставшихся байтов,
-закрытие stdin или сохранение файла выполняются отдельно.
-
-### Документ из частей
-
-`Decoder<T>` и `Encoder<T>` подключают типы `Decode` и `Encode` к потоковому API:
-
-- `Decoder<T>` принимает байты частями и возвращает один документ после `finish`.
-- `Encoder<T>` принимает один документ и добавляет его представление в выходной буфер.
-
-Поддерживаются `Json<T>`, `Toml<T>`, `Markdown`, текст, байты и собственные типы.
-Документ должен помещаться в память. Для последовательности записей используется `Jsonl<T>`.
-
-```rust
-use anyhow::Context;
-use fairway_codec::{Decoder, Encoder, Markdown, StreamDecode, StreamEncode};
-
-fn markdown_from_chunks(chunks: Vec<Vec<u8>>) -> anyhow::Result<Vec<u8>> {
-    let mut decoder = Decoder::<Markdown>::new();
-    for chunk in chunks {
-        decoder.push(chunk)?;
-    }
-    decoder.finish()?;
-    let document = decoder.next()?.context("Декодер не вернул документ")?;
-
-    let mut encoder = Encoder::<Markdown>::new();
-    let mut bytes = Vec::new();
-    encoder.encode(document, &mut bytes)?;
-    encoder.finish(&mut bytes)?;
-    Ok(bytes)
-}
-```
-
-## Собственные типы
-
-`Decode` задаёт разбор байтов в собственный тип, `Encode` — обратное преобразование.
-Трейты реализуются независимо. Вложенные форматы вызываются через синхронные методы:
-всё преобразование выполняется в одной задаче при вызове `codec::decode` или `codec::encode`.
-
-Собственный тип позволяет добавить к Markdown обязательный TOML frontmatter
-с полем `title` между строками `+++`:
+Пример: Markdown с обязательным заголовком TOML между строками `+++`.
 
 ```text
 +++
-title = "Датасет"
+title = "Dataset"
 +++
-# Описание
+# Description
 
-Первая часть датасета.
+The first part of the dataset.
 ```
 
 ```rust
 use anyhow::Context;
-use fairway_codec::{self as codec, Decode, Encode, Markdown, Toml};
+use fairway_codec::{Decode, Encode, Markdown, Toml};
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize)]
@@ -267,310 +218,83 @@ struct Article {
     body: Markdown,
 }
 
-impl codec::Decode for Article {
+impl Decode for Article {
     type Error = anyhow::Error;
 
     fn decode(bytes: Vec<u8>) -> anyhow::Result<Self> {
-        let text = String::decode(bytes)?.replace("\r\n", "\n");
+        let text = String::decode(bytes)?;
         let content = text
-            .strip_prefix("+++\n")
-            .context("Документ должен начинаться с TOML frontmatter")?;
-        let (header, body) = content
-            .split_once("\n+++\n")
-            .or_else(|| content.strip_suffix("\n+++").map(|header| (header, "")))
-            .context("Отсутствует закрывающая строка +++")?;
-        let frontmatter: Toml<Frontmatter> = Toml::decode(header.as_bytes().to_vec())?;
-
-        Ok(Self {
-            frontmatter: frontmatter.into_inner(),
-            body: Markdown::parse(body.to_owned()),
-        })
+            .strip_prefix("+++\r\n")
+            .or_else(|| text.strip_prefix("+++\n"))
+            .context("the document must start with TOML frontmatter")?;
+        let mut header_end = 0;
+        for line in content.split_inclusive('\n') {
+            if line.trim_end_matches(['\r', '\n']) == "+++" {
+                let header = &content[..header_end];
+                let body = &content[header_end + line.len()..];
+                let Toml(frontmatter) = Toml::decode(header.as_bytes().to_vec())?;
+                return Ok(Self {
+                    frontmatter,
+                    body: Markdown::parse(body.to_owned()),
+                });
+            }
+            header_end += line.len();
+        }
+        anyhow::bail!("the closing +++ line is missing")
     }
 }
 
-impl codec::Encode for Article {
+impl Encode for Article {
     type Error = anyhow::Error;
 
     fn encode(self) -> anyhow::Result<Vec<u8>> {
-        let header = Toml(self.frontmatter).encode()?;
         let mut bytes = b"+++\n".to_vec();
-        bytes.extend_from_slice(&header);
-        if !bytes.ends_with(b"\n") {
-            bytes.push(b'\n');
-        }
+        bytes.extend(Toml(self.frontmatter).encode()?);
         bytes.extend_from_slice(b"+++\n");
-        bytes.extend_from_slice(&self.body.encode()?);
+        bytes.extend(self.body.encode()?);
         Ok(bytes)
     }
 }
 
-async fn change_title(input: String, title: String) -> anyhow::Result<Vec<u8>> {
-    let mut article: Article = codec::decode(input.into_bytes()).await?;
+fn change_title(input: Vec<u8>, title: String) -> anyhow::Result<Vec<u8>> {
+    let mut article = Article::decode(input)?;
     article.frontmatter.title = title;
-    codec::encode(article).await
+    article.encode()
+}
+
+fn main() -> anyhow::Result<()> {
+    for newline in ["\n", "\r\n"] {
+        let body = format!("# Description{newline}{newline}Text.{newline}");
+        let input = format!("+++{newline}title = \"Old\"{newline}+++{newline}{body}");
+        let output = change_title(input.into_bytes(), "New".to_owned())?;
+        let article = Article::decode(output)?;
+        assert_eq!(article.frontmatter.title, "New");
+        assert_eq!(article.body.as_ref(), body);
+    }
+    Ok(())
 }
 ```
 
-Плагин реализует трейты для собственного типа. Реализовать `codec::Decode`
-или `codec::Encode` непосредственно для `codec::Markdown` нельзя
-по [правилам Rust](https://doc.rust-lang.org/reference/items/implementations.html#orphan-rules).
-
-## API
-
-### Преобразование
-
-- `decode::<T>(data).await -> Result<T, T::Error>` — вызывает `T::decode` в пуле
-  (на месте при `IS_NOOP = true`).
-  Требуется `T: Decode + Send + 'static`, `T::Error: Send + 'static`.
-  Аргумент `data` — собственный `Vec<u8>`.
-- `encode(value).await -> Result<Vec<u8>, T::Error>` — вызывает `T::encode` в пуле
-  (на месте при `IS_NOOP = true`) и возвращает собственный буфер.
-  Требуется `T: Encode + Send + 'static`, `T::Error: Send + 'static`.
-
-Функции потребляют входные данные, в том числе при ошибке. Для декодирования
-передавайте `Vec<u8>`; `String` преобразуется через `.into_bytes()` без копирования.
-Для среза нужна явная `.to_vec()` в месте вызова. Для кодирования передавайте
-значение, например `Json(value)`. Ссылки на локальные значения не удовлетворяют `'static`.
-
-### Синхронные трейты
-
-`Decode: Sized` задаёт разбор данных:
-
-- `type Error` — тип ошибки декодирования.
-- `const IS_NOOP: bool` — декодирование передаёт байты как есть, без разбора и проверки.
-  По умолчанию `false`; из встроенных типов `true` только у `Vec<u8>`.
-- `decode(bytes: Vec<u8>) -> Result<Self, Self::Error>` — разбирает байты в значение.
-
-`Encode: Sized` задаёт кодирование значения:
-
-- `type Error` — тип ошибки кодирования.
-- `const IS_NOOP: bool` — кодирование возвращает байты значения как есть.
-  По умолчанию `false`; `true` у `Vec<u8>`, `[u8; N]`, `String` и `Markdown`.
-- `encode(self) -> Result<Vec<u8>, Self::Error>` — возвращает представление в байтах.
-
-Оба трейта потребляют вход и возвращают собственный результат. Реализация может
-использовать входной буфер, увеличить его или создать другое представление;
-размер результата не ограничен размером входа. `String`, `Vec<u8>` и `Markdown`
-используют ту же память под байты. JSON и TOML создают разобранное значение или
-сериализованное представление и могут выделять дополнительную память.
-
-Оба трейта синхронные и не требуют `Send` или `'static`.
-Каждая реализация задаёт собственный тип ошибки. Обёртка `Json(&value)` позволяет
-явно передать ссылку на сериализуемую модель для синхронного кодирования;
-потребление обёртки не клонирует модель.
-
-### Форматы
-
-Целый документ при разборе и результат одного вызова `Encode` должны помещаться в память.
-
-#### Текст и байты
-
-- `String` реализует `Decode`: проверяет UTF-8 и забирает память входного буфера.
-- `Vec<u8>` реализует `Decode`: возвращает исходный буфер без изменений.
-- `String` и `Vec<u8>` реализуют `Encode`, передавая свою память под байты.
-- `[u8; N]` реализует `Encode`, перенося байты массива в `Vec<u8>`.
-- Общей реализации `Encode` для срезов и ссылок нет. Вызывайте `.to_owned()`,
-  `.to_vec()` или `.clone()` явно, если исходник нужно сохранить.
-
-#### Json и Toml
-
-- `Json<T>` содержит одно JSON-значение. После него во входных данных разрешены
-  только пробельные символы. Кодирование даёт компактный JSON с завершающим `\n`.
-- `Toml<T>` содержит документ UTF-8, разобранный по [правилам TOML](https://toml.io/en/).
-  При кодировании комментарии и исходное оформление не сохраняются.
-
-Значения создаются через `Json(value)` и `Toml(value)`. Оба типа предоставляют методы:
-
-- `into_inner() -> T` — извлекает содержимое.
-- `as_ref() -> &T` — возвращает ссылку через `AsRef<T>`.
-
-Реализации трейтов независимы:
-
-- `Decode` требует `T: serde::de::DeserializeOwned`.
-- `Encode` требует `T: serde::Serialize`.
-
-Синхронное кодирование поддерживает ссылки, например `Json(&value)`.
-Методы `into_inner` и `as_ref` также синхронные.
-
-#### Markdown
-
-`Markdown` реализует `Decode` и `Encode` для [CommonMark](https://spec.commonmark.org/)
-без расширений. Синхронные методы:
-
-- `parse(text: String) -> Markdown` — забирает текст UTF-8 без копирования и разбора структуры.
-- `as_ref() -> &str` — возвращает ссылку на исходный текст через `AsRef<str>`.
-- `events() -> impl Iterator<Item = markdown::Event<'_>> + '_` — начинает новый
-  синхронный обход элементов документа без кеширования событий.
-
-`codec::markdown` реэкспортирует `Event`, `Tag`, `TagEnd` и связанные типы
-[pulldown-cmark](https://docs.rs/pulldown-cmark/latest/pulldown_cmark/).
-
-### Потоковые преобразования
-
-`StreamDecode` и `StreamEncode` работают синхронно с данными в памяти.
-Их можно реализовать независимо для собственного формата или протокола.
-Трейты не требуют `Send` или `'static`. Асинхронный адаптер управляет вводом-выводом
-и передаёт длительные преобразования в вычислительный пул.
-
-#### StreamDecode
-
-- `type Item` — тип одной разобранной записи.
-- `type Error` — тип ошибки разбора.
-- `push(&mut self, bytes: Vec<u8>) -> Result<(), Self::Error>` — принимает порцию байтов.
-  Граница порции может проходить внутри значения или символа UTF-8.
-- `next(&mut self) -> Result<Option<Self::Item>, Self::Error>` — возвращает готовое значение.
-  До конца ввода `None` означает нехватку данных, после — конец последовательности.
-- `finish(&mut self) -> Result<(), Self::Error>` — сообщает о конце ввода.
-  После успешного завершения повторный вызов допустим, `push` — ошибка.
-
-После каждого `push` и после `finish` вызывайте `next` до `None`.
-Любая ошибка прекращает разбор.
-
-#### StreamEncode
-
-- `type Item` — тип кодируемого значения.
-- `type Error` — тип ошибки кодирования.
-- `encode(&mut self, item: Self::Item, output: &mut Vec<u8>) -> Result<(), Self::Error>` —
-  добавляет байты очередного значения в буфер.
-- `finish(&mut self, output: &mut Vec<u8>) -> Result<(), Self::Error>` —
-  добавляет завершение формата, если оно требуется.
-
-Правила работы с буфером и завершением:
-
-- Буфер принадлежит вызывающему коду. После передачи байтов потребителю его можно очистить.
-- Успешный вызов добавляет байты, сохраняя существующее содержимое буфера.
-  Пустой буфер может получить память кодируемого значения.
-- Входное значение потребляется даже при ошибке. Ошибка оставляет выходной буфер
-  неизменным и запрещает дальнейшее кодирование.
-- Повторный успешный `finish` ничего не добавляет. `encode` после `finish` — ошибка.
-- Завершение кодера, отправка его байтов и закрытие потока ввода-вывода — отдельные операции.
-
-#### JSONL
-
-`Jsonl<T>` реализует потоковые трейты с `Item = T` и `Error = codec::Error`:
-
-- `StreamDecode` — при `T: serde::de::DeserializeOwned`.
-- `StreamEncode` — при `T: serde::Serialize`.
-
-Ограничения и состояния чтения и записи независимы.
-Конструктор `Jsonl::<T>::new()` и `Default` не требуют ни одного из ограничений.
-
-Собственные методы `Jsonl<T>`:
-
-- `new() -> Jsonl<T>` — создаёт кодек без входных и выходных записей.
-- `push(&mut self, chunk: Vec<u8>) -> Result<(), Error>` — добавляет порцию байтов.
-- `next(&mut self) -> Result<Option<T>, Error>` — разбирает одну доступную строку.
-- `finish(&mut self)` — отмечает конец ввода. Повторный вызов допустим.
-
-Методы `push`, `next` и `finish` требуют `T: serde::de::DeserializeOwned`.
-
-Разбор следует правилам `StreamDecode`:
-
-- Вход — UTF-8 без BOM, по одному JSON-значению на строку.
-- Допустимы `\n`, `\r\n` и последняя строка без перевода.
-- Пустая строка — ошибка. Пустой источник содержит ноль записей.
-- Неполная строка, включая незавершённый символ UTF-8, сохраняется между вызовами `push`.
-- Если непрочитанных байтов нет, следующая непустая порция принимается без копирования.
-  Иначе непрочитанный остаток сдвигается и к нему добавляется новая порция;
-  это может потребовать копирования байтов и увеличения буфера.
-- Обработанные записи не накапливаются. В память должны помещаться непрочитанные байты
-  и одна разобранная запись.
-- После ошибки `next` возвращает `Ok(None)`.
-- `push` после ошибки или `finish` возвращает `Error::Decode` с форматом `"jsonl"`.
-
-Кодирование следует правилам `StreamEncode`:
-
-- Каждая запись кодируется как `Json(value)` с завершающим `\n`.
-- `StreamEncode::finish` не добавляет байтов.
-- Ноль записей даёт пустой вывод.
-- Ошибки кодирования имеют формат `"jsonl"`.
-
-Вызовы завершения ввода и вывода различаются:
-
-- `Jsonl::finish(&mut codec)` — завершает ввод и возвращает `()`.
-- `StreamDecode::finish(&mut codec)` — завершает ввод и возвращает `Result<(), Error>`.
-- `StreamEncode::finish(&mut codec, &mut output)` — завершает вывод и возвращает `Result<(), Error>`.
-
-#### Decoder
-
-`Decoder<T>` реализует `StreamDecode` при `T: Decode`.
-`Item = T`, `Error = StreamError<T::Error>`.
-
-- `Decoder::<T>::new()` — создаёт декодер одного документа. Также реализован `Default`.
-
-Декодер забирает первый непустой буфер, добавляет следующие порции и передаёт
-накопленный буфер во владение `T::decode` после конца ввода. Добавление может
-увеличивать буфер и переносить байты: владение не устраняет сборку разделённых записей:
-
-- До `finish` метод `next` возвращает `None`.
-- После `finish` первый `next` возвращает документ или ошибку преобразования.
-  Последующие вызовы возвращают `Ok(None)`.
-- Пустой ввод проверяется по правилам выбранного `Decode`.
-- После ошибки `next` возвращает `Ok(None)`.
-
-#### Encoder
-
-`Encoder<T>` реализует `StreamEncode` при `T: Encode`.
-`Item = T`, `Error = StreamError<T::Error>`.
-
-- `Encoder::<T>::new()` — создаёт кодер одного документа. Также реализован `Default`.
-
-Кодер использует существующий `Encode` и требует ровно одно значение:
-
-- Второй вызов `encode` — ошибка.
-- `finish` без переданного значения — ошибка. Для пустого текста или байтов передайте пустое значение.
-
-### Выполнение
-
-Способ выполнения задаётся вызовом и не зависит от размера данных:
-
-- `codec::decode` и `codec::encode` передают преобразование в общий пул [fairway-compute](compute.md).
-  Преобразования с `IS_NOOP = true` выполняются на месте.
-- Методы `Decode`, `Encode`, `StreamDecode` и `StreamEncode` выполняются на текущем потоке
-  и не должны выполнять ввод-вывод.
-
-Пул общий для процесса. Число потоков равно `std::thread::available_parallelism()`,
-при невозможности его определить используется один поток. Настройка потоков Tokio
-этот лимит не меняет. Ожидание свободного места асинхронное.
-
-Преобразования, переданные в пул, не занимают рабочие потоки Tokio
-и его пул блокирующего ввода-вывода.
-Это соответствует [рекомендациям Tokio](https://docs.rs/tokio/latest/tokio/index.html#cpu-bound-tasks-and-blocking-code).
-
-Ожидание свободного места можно отменить. Уже переданное в пул преобразование
-выполняется, даже если оно ещё не успело начаться, и удерживает место до завершения.
-Если ожидание отменено, результат отбрасывается.
-
-### Ошибки
-
-Тип ошибки зависит от преобразования:
-
-- Декодирование `String` и `Markdown` — `std::str::Utf8Error` при некорректном UTF-8.
-- Декодирование `Vec<u8>`, кодирование текста и байтов — `std::convert::Infallible`.
-- JSON, TOML, JSONL и кодирование Markdown — `codec::Error`.
-- Кодирование `&T` — ошибка `T::Error`.
-- `Decoder<T>` и `Encoder<T>` — `StreamError<E>`, где `E` — ошибка выбранного преобразования.
-
-#### Error
-
-`codec::Error` реализует `std::error::Error`, `Send` и `Sync`. Варианты:
-
-- `Decode { format, line, column, source }` — ошибка формата, состояния парсера или преобразования в тип.
-- `Encode { format, source }` — ошибка преобразования значения в байты.
-
-Поля ошибки:
-
-- `format: &'static str` — имя формата: `"json"`, `"jsonl"`, `"toml"` или `"markdown"`.
-- `line: Option<u64>` и `column: Option<u64>` — позиция, если она известна.
-  Нумерация начинается с `1`. Для JSONL номер строки относится ко всему источнику.
-- `source: Box<dyn std::error::Error + Send + Sync>` — исходная ошибка.
-
-#### StreamError
-
-- `Codec(E)` — исходная ошибка `Decode` или `Encode`.
-- `Closed` — вход завершён или кодер уже принял документ.
-- `Failed` — предыдущая ошибка прекратила преобразование.
-- `MissingValue` — `Encoder::finish` вызван без документа.
-
-`StreamError<E>` реализует `std::error::Error` при `E: std::error::Error + 'static`.
-`source()` у `Codec(E)` возвращает исходную ошибку.
+- `decode` и `encode` синхронные. Выполняйте в них только преобразование,
+  без ввода-вывода: в `write` и `edit` `fairway-fs` вызывает их, удерживая
+  блокировку файла.
+- Тип ошибки выбираете вы. Встроенные форматы используют `codec::Error`,
+  пример выше — `anyhow::Error`, а формат, который не может завершиться
+  ошибкой, — `Infallible`.
+- Чтобы тип работал с `fairway-fs`, он должен быть `Send + 'static`, а его
+  ошибка — `Send` и преобразовываться в `Box<dyn Error + Send + Sync>`. Этим
+  условиям отвечают, например, `anyhow::Error`, `io::Error`, `codec::Error`
+  и `Infallible`.
+- Паника в `decode` или `encode`, которые вызвал `fairway-fs`, продолжается
+  в задаче, которая ждёт `read`, `write` или `edit`, а файл остаётся прежним.
+
+## Документация API
+
+Полное описание типов, трейтов и ошибок — в документации крейта. Локально
+её открывает команда
+
+```sh
+cargo doc -p fairway-codec --open
+```
+
+Опубликованные версии доступны на [docs.rs](https://docs.rs/fairway-codec).

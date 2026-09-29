@@ -89,12 +89,16 @@ pub async fn temp_file() -> Result<TempFile, Error> {
 /// ```
 pub async fn temp_dir() -> Result<TempDir, Error> {
     super::blocking(Operation::CreateTemporaryDirectory, None, || {
-        Ok(TempDir(Some(
-            tempfile::Builder::new()
-                .prefix("fairway-")
-                .tempdir()
-                .map_err(|source| Error::io(Operation::CreateTemporaryDirectory, None, source))?,
-        )))
+        let mut builder = tempfile::Builder::new();
+        builder.prefix("fairway-");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            builder.permissions(std::fs::Permissions::from_mode(0o700));
+        }
+        Ok(TempDir(Some(builder.tempdir().map_err(|source| {
+            Error::io(Operation::CreateTemporaryDirectory, None, source)
+        })?)))
     })
     .await
 }

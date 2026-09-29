@@ -1,6 +1,6 @@
 //! Behavior that needs separate processes: locks shared between processes,
 //! the cleanup at startup, the Fairway directory, which each process resolves
-//! only once, and operations that could hang.
+//! only once, process-wide umask changes, and operations that could hang.
 //!
 //! The tests run this test binary again as a child process, in which the
 //! `child_process` test performs the action named by `FAIRWAY_FS_TEST_CHILD`.
@@ -62,6 +62,26 @@ fn child_process() {
                 fs::__private::initialize()?;
                 std::env::set_current_dir(&target)?;
                 println!("HOME:{}", fs::home().await?.display());
+            }
+            #[cfg(unix)]
+            "temp-dir-permissions" => {
+                use std::os::unix::fs::PermissionsExt;
+
+                let mask =
+                    libc::mode_t::from_str_radix(&std::env::var("FAIRWAY_FS_TEST_UMASK")?, 8)?;
+                // SAFETY: this child runs only this test. Changing its umask
+                // cannot affect file creation in the parent or other tests.
+                #[allow(unsafe_code)]
+                unsafe {
+                    libc::umask(mask);
+                }
+                let directory = fs::temp_dir().await?;
+                assert_eq!(
+                    directory.path().metadata()?.permissions().mode() & 0o777,
+                    0o700,
+                    "temporary directories must be private to their owner"
+                );
+                directory.close().await?;
             }
             #[cfg(unix)]
             "home-error" => {
@@ -153,6 +173,25 @@ impl Running {
             .recv_timeout(Duration::from_secs(10))
             .expect("child must acquire the lock");
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn temporary_directories_are_private_under_different_umasks() -> anyhow::Result<()> {
+    let directory = tempfile::tempdir()?;
+    let home = directory.path().join("home");
+    for mask in ["000", "022", "077"] {
+        let output = child("temp-dir-permissions", directory.path(), &home)
+            .env("FAIRWAY_FS_TEST_UMASK", mask)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "umask {mask}:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(())
 }
 
 #[cfg(unix)]

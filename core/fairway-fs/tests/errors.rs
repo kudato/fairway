@@ -125,6 +125,14 @@ async fn own_validation_errors_have_context_without_an_artificial_source() -> an
 }
 
 #[tokio::test]
+async fn exists_rejects_an_empty_path() {
+    let error = fs::exists("").await.unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::NotFound);
+    assert_eq!(error.operation(), Operation::ResolvePath);
+    assert_eq!(error.path(), Some(Path::new("")));
+}
+
+#[tokio::test]
 async fn a_busy_error_identifies_the_target_and_has_no_lower_level_cause() -> anyhow::Result<()> {
     let directory = tempfile::tempdir()?;
     let path = std::fs::canonicalize(directory.path())?.join("data");
