@@ -980,6 +980,42 @@ mod unix {
 
     #[cfg(target_os = "macos")]
     #[tokio::test]
+    async fn macos_writes_and_edits_accept_creation_time_rounding() -> anyhow::Result<()> {
+        use std::{
+            fs::{File, FileTimes},
+            os::macos::fs::FileTimesExt,
+        };
+
+        let directory = tempfile::tempdir()?;
+        let reference = File::create(directory.path().join("reference"))?;
+        for editing in [false, true] {
+            let path = directory
+                .path()
+                .join(if editing { "edit" } else { "write" });
+            // On exFAT, a newly created file can have a more precise creation
+            // time than the filesystem can preserve when setting it later.
+            std::fs::write(&path, "old")?;
+            let created = std::fs::metadata(&path)?.created()?;
+            reference.set_times(FileTimes::new().set_created(created))?;
+            let expected = reference.metadata()?.created()?;
+
+            if editing {
+                fs::edit(&path, |text: String| async move {
+                    assert_eq!(text, "old");
+                    Ok::<_, fs::Error>("new".to_owned())
+                })
+                .await?;
+            } else {
+                fs::write(&path, "new".to_owned()).await?;
+            }
+            assert_eq!(std::fs::metadata(&path)?.created()?, expected);
+            assert_eq!(std::fs::read_to_string(&path)?, "new");
+        }
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
     async fn macos_protected_files_fail_without_leaking_temporaries() -> anyhow::Result<()> {
         use std::process::Command;
         for flag in ["uchg", "uappnd"] {

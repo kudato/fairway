@@ -88,8 +88,8 @@ pub(super) fn lock_key(path: &std::path::Path) -> Result<std::path::PathBuf> {
 /// `source`; on Linux, the attributes include the POSIX ACL. On macOS, also
 /// copies the ACL, the creation time, and the file flags.
 ///
-/// Afterwards it checks that the result matches, because some changes can
-/// undo others or be ignored by the filesystem.
+/// Afterwards it checks ownership, permissions, and file flags, because some
+/// changes can undo others or be ignored by the filesystem.
 pub(crate) fn copy_metadata(source: &File, target: &File) -> Result<()> {
     let before = source.metadata()?;
     #[cfg(target_os = "macos")]
@@ -133,7 +133,8 @@ pub(crate) fn copy_metadata(source: &File, target: &File) -> Result<()> {
         {
             return Err(io::Error::last_os_error().into());
         }
-        // Keep the creation time, but not the old modification time.
+        // The filesystem may round the creation time even on success.
+        // Keep the new modification time.
         target.set_times(FileTimes::new().set_created(before.created()?))?;
         // SAFETY: fchflags takes no pointers, and `target` keeps the descriptor
         // open during the call.
@@ -154,10 +155,10 @@ pub(crate) fn copy_metadata(source: &File, target: &File) -> Result<()> {
         ));
     }
     #[cfg(target_os = "macos")]
-    if before.created()? != after.created()? || before.st_flags() != after.st_flags() {
+    if before.st_flags() != after.st_flags() {
         return Err(Cause::Message(
             io::ErrorKind::Other,
-            "could not preserve file creation time and flags",
+            "could not preserve file flags",
         ));
     }
     Ok(())
