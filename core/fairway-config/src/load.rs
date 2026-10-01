@@ -158,6 +158,12 @@ fn merge(
             }
         }
     }
+    if let Some(name) = table.keys().next() {
+        return Err(Error::message(format!(
+            "{}: unknown configuration namespace {name:?}",
+            path.display(),
+        )));
+    }
     Ok(document)
 }
 

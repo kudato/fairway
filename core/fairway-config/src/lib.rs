@@ -14,6 +14,9 @@
 //!
 //! Fairway prepares every namespace before running a command. Handlers read the
 //! prepared settings synchronously through [`Namespace::get`].
+//!
+//! Every top-level configuration key must name a namespace declared with [`namespace!`].
+//! Unknown names are loading errors that identify the key and its file.
 
 mod error;
 mod load;

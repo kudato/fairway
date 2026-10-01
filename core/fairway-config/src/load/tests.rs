@@ -340,12 +340,40 @@ async fn every_document_is_parsed_even_without_registrations_or_before_an_overri
         assert!(error.to_string().contains("config.toml"));
         assert!(error.source().is_some());
     }
-    write(home.path(), "config.toml", "[unknown]\nvalue = true\n");
-    assert!(table(home.path()).await.unwrap().is_empty());
+    write(home.path(), "config.toml", "");
     write(home.path(), "conf.d/a.toml", "[settings\n");
     write(home.path(), "conf.d/b.toml", "[settings]\nvalue = 5\n");
     let error = table(home.path()).await.unwrap_err();
     assert!(error.to_string().contains("a.toml"));
+}
+
+#[tokio::test]
+async fn unknown_top_level_names_are_errors_in_each_file() {
+    for relative in ["config.toml", "conf.d/nested/settings.toml"] {
+        for namespaces in [vec![], vec![&TABLE_REGISTRATION]] {
+            let home = TempDir::new().unwrap();
+            write(home.path(), relative, "");
+            load(home.path(), namespaces.clone()).await.unwrap();
+            for text in [
+                "[setings]\n",
+                "[setings]\nvalue = 1\n",
+                "[setings.nested]\nvalue = 1\n",
+                "setings = 1\n",
+                "[[setings]]\nvalue = 1\n",
+            ] {
+                write(home.path(), relative, text);
+                let error = load(home.path(), namespaces.clone()).await.unwrap_err();
+                assert_eq!(
+                    error.to_string(),
+                    format!(
+                        "{}: unknown configuration namespace \"setings\"",
+                        home.path().join(relative).display(),
+                    ),
+                    "{text}",
+                );
+            }
+        }
+    }
 }
 
 #[tokio::test]

@@ -142,10 +142,9 @@ The first additional file changes `listen`, and the second changes
   variables are not expanded, and relative paths are not resolved against
   the file's location. The plugin's documentation describes how it treats
   relative paths.
-- Fairway checks the syntax of the entire file. If a table does not belong
-  to any available plugin, its parameters are skipped. A typo in the name,
-  such as `[harnes]` instead of `[harness]`, therefore produces no error,
-  but the settings in that table are not applied.
+- Top-level tables must belong to plugins included in the program.
+  A typo in the name, such as `[harnes]` instead of `[harness]`, produces
+  a loading error identifying the name and file.
 
 ## Errors
 
@@ -157,7 +156,8 @@ replace invalid ones.
 
 Loading fails if:
 
-- any file has a TOML syntax error, even in a table that no plugin reads;
+- any file has a TOML syntax error;
+- a top-level key's name is not declared by any included plugin;
 - a plugin's table is replaced by another value, such as `harness = 1`;
 - parameters do not follow the plugin's rules: for example, a string is
   given instead of a number, a required parameter is missing, or the plugin

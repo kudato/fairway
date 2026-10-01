@@ -298,23 +298,30 @@ fn configuration_precedes_handlers_and_errors_leave_help_available() {
     assert!(String::from_utf8_lossy(&output.stdout).contains("SETTINGS:2:0"));
 
     // Even an unused namespace must be valid before the selected handler runs.
-    std::fs::write(
-        home.path().join("conf.d/other.toml"),
-        "[other]\nvalue = 'invalid'\n",
-    )
-    .unwrap();
-    let output = child("settings", home.path()).output().unwrap();
-    assert_eq!(output.status.code(), Some(1), "{output:?}");
-    assert!(!String::from_utf8_lossy(&output.stdout).contains("SETTINGS:"));
-    let diagnostic = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        diagnostic.contains("other.toml") && diagnostic.contains("other"),
-        "{diagnostic}"
-    );
-    for (argument, code) in [("--help", 0), ("--version", 0), ("--unknown", 2)] {
-        let output = child(argument, home.path()).output().unwrap();
-        assert_eq!(output.status.code(), Some(code), "{output:?}");
-        assert!(!String::from_utf8_lossy(&output.stderr).contains("other.toml"));
+    for (settings, expected) in [
+        (
+            "[other]\nvalue = 'invalid'\n",
+            "invalid settings in namespace \"other\"",
+        ),
+        (
+            "[othre]\nvalue = 1\n",
+            "unknown configuration namespace \"othre\"",
+        ),
+    ] {
+        std::fs::write(home.path().join("conf.d/other.toml"), settings).unwrap();
+        let output = child("settings", home.path()).output().unwrap();
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("SETTINGS:"));
+        let diagnostic = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            diagnostic.contains("other.toml") && diagnostic.contains(expected),
+            "{diagnostic}"
+        );
+        for (argument, code) in [("--help", 0), ("--version", 0), ("--unknown", 2)] {
+            let output = child(argument, home.path()).output().unwrap();
+            assert_eq!(output.status.code(), Some(code), "{output:?}");
+            assert!(!String::from_utf8_lossy(&output.stderr).contains("other.toml"));
+        }
     }
 }
 

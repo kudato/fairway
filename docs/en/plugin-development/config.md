@@ -274,10 +274,10 @@ after merging. An individual file may contain only part of the settings.
 A repeated key within one file follows TOML rules and is an error;
 matching keys across files follow the merging rules.
 
-Unregistered top-level keys are ignored. This allows the same files
-to be used with different sets of plugins. A misspelled namespace name
-is also ignored. Syntax and UTF-8 are checked in every selected file,
-including the contents of unregistered namespaces.
+Every top-level key must correspond to a namespace declared with
+`namespace!` in the built application. An unknown name is a loading error
+that identifies the file and name.
+Syntax and UTF-8 are checked in every selected file.
 
 Strings are passed to settings without expanding environment variables or `~`.
 Relative paths in fields are not automatically resolved against the file's directory.
@@ -331,6 +331,7 @@ The [`fs` reading rules](fs.md#reading) apply to each individual file.
   Missing main sources follow the [source rules](#sources).
 - Invalid UTF-8 or TOML in any selected file is a loading error,
   even if later files override its values.
+- A top-level key without a declared settings namespace is a loading error.
 - A registered namespace value that is not a table is a loading error.
 - An incompatible value type, a missing required field, or a validation failure
   when deserializing the resulting settings is a namespace loading error.
