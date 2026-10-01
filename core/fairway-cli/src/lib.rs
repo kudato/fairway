@@ -1,9 +1,14 @@
 //! Commands and arguments for Fairway plugins.
 //!
 //! ```
+//! use fairway_cli::Shutdown;
+//!
 //! fairway_cli::namespace!(CLI, "hello", "Print a greeting");
 //!
-//! async fn hello() -> anyhow::Result<()> {
+//! async fn hello(shutdown: Shutdown) -> anyhow::Result<()> {
+//!     if shutdown.is_requested() {
+//!         return Ok(());
+//!     }
 //!     println!("Hello, world!");
 //!     Ok(())
 //! }
@@ -11,12 +16,12 @@
 //! fairway_cli::command!(CLI, "Print a greeting", hello);
 //! ```
 //!
-//! A handler may take arguments implementing [`clap::Args`], a
-//! [`Shutdown`], both in that order, or neither. Its future must be
-//! `Send` and return `anyhow::Result<()>`.
+//! A handler takes a [`Shutdown`], optionally preceded by arguments
+//! implementing [`clap::Args`]. Its future must be `Send` and return
+//! `anyhow::Result<()>`.
 //!
 //! Fairway owns the runtime, signal handling, and process lifecycle.
-//! Plugins only need [`namespace!`], [`command!`], and optionally [`Shutdown`].
+//! Plugins use [`namespace!`], [`command!`], and [`Shutdown`].
 
 mod handler;
 mod macros;
@@ -47,9 +52,9 @@ pub mod __private {
 
 /// An observer of Fairway's shutdown request.
 ///
-/// Fairway handles termination signals and enforces its shutdown
-/// deadline whether or not a handler accepts this argument. Use the
-/// handle when the command needs to finish requests or save state.
+/// Every command handler receives this observer and must handle its shutdown
+/// request. Fairway handles termination signals and enforces its shutdown
+/// deadline.
 #[derive(Debug, Clone, Default)]
 pub struct Shutdown {
     token: CancellationToken,

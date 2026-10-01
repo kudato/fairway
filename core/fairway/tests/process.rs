@@ -31,13 +31,13 @@ struct Settings {
 fairway_config::namespace!(SETTINGS: Settings, "probe");
 fairway_config::namespace!(OTHER: Settings, "other");
 
-async fn settings() -> anyhow::Result<()> {
+async fn settings(_: Shutdown) -> anyhow::Result<()> {
     println!("SETTINGS:{}:{}", SETTINGS.get().value, OTHER.get().value);
     Ok(())
 }
 fairway_cli::command!(CLI, "settings", "Loaded settings", settings);
 
-async fn flavor() -> anyhow::Result<()> {
+async fn flavor(_: Shutdown) -> anyhow::Result<()> {
     tokio::spawn(async {
         let handle = tokio::runtime::Handle::current();
         println!(
@@ -59,8 +59,8 @@ struct Pool {
     workers: usize,
 }
 
-async fn pool(_: Pool) -> anyhow::Result<()> {
-    flavor().await
+async fn pool(_: Pool, shutdown: Shutdown) -> anyhow::Result<()> {
+    flavor(shutdown).await
 }
 fairway_cli::command!(
     CLI,
@@ -70,14 +70,14 @@ fairway_cli::command!(
     workers = |args: &Pool| args.workers
 );
 
-async fn prepared() -> anyhow::Result<()> {
+async fn prepared(_: Shutdown) -> anyhow::Result<()> {
     println!("HANDLER");
     Ok(())
 }
 fairway_cli::command!(CLI, "prepared", "Prepared application", prepared);
 fairway_cli::command!(CLI, "preparation-error", "Failed preparation", prepared);
 
-async fn error() -> anyhow::Result<()> {
+async fn error(_: Shutdown) -> anyhow::Result<()> {
     anyhow::bail!("command failed");
 }
 fairway_cli::command!(CLI, "error", "Handler error", error);
@@ -103,11 +103,11 @@ async fn failing(shutdown: Shutdown) -> anyhow::Result<()> {
 }
 fairway_cli::command!(CLI, "failing", "Shutdown error", failing);
 
-async fn pending() -> anyhow::Result<()> {
+async fn pending(_: Shutdown) -> anyhow::Result<()> {
     ready();
     std::future::pending().await
 }
-fairway_cli::command!(CLI, "pending", "No shutdown argument", pending);
+fairway_cli::command!(CLI, "pending", "Ignored shutdown request", pending);
 
 async fn blocked(_: Shutdown) -> anyhow::Result<()> {
     ready();
@@ -117,7 +117,7 @@ async fn blocked(_: Shutdown) -> anyhow::Result<()> {
 }
 fairway_cli::command!(CLI, "blocked", "Blocked execution thread", blocked);
 
-async fn locked() -> anyhow::Result<()> {
+async fn locked(_: Shutdown) -> anyhow::Result<()> {
     let _stderr = std::io::stderr().lock();
     ready();
     loop {
@@ -126,7 +126,7 @@ async fn locked() -> anyhow::Result<()> {
 }
 fairway_cli::command!(CLI, "locked", "Blocked stderr", locked);
 
-async fn saturated() -> anyhow::Result<()> {
+async fn saturated(_: Shutdown) -> anyhow::Result<()> {
     let barrier = Arc::new(Barrier::new(3));
     for _ in 0..2 {
         let barrier = barrier.clone();
@@ -149,7 +149,7 @@ fairway_cli::command!(
     workers = 2
 );
 
-async fn teardown() -> anyhow::Result<()> {
+async fn teardown(_: Shutdown) -> anyhow::Result<()> {
     let barrier = Arc::new(Barrier::new(2));
     let task_barrier = barrier.clone();
     tokio::task::spawn_blocking(move || {
@@ -201,7 +201,7 @@ fn child_process() {
     });
 }
 
-async fn preparation() -> anyhow::Result<()> {
+async fn preparation(_: Shutdown) -> anyhow::Result<()> {
     unreachable!("the application preparation is blocked");
 }
 fairway_cli::command!(

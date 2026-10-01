@@ -5,6 +5,7 @@ use std::ffi::OsString;
 use std::sync::Barrier;
 
 use fairway_cli::__private::{Cli, PreparedCommand, Threading};
+use fairway_cli::Shutdown;
 
 fairway_cli::namespace!(FIRST, "first", "First namespace");
 fairway_cli::namespace!(TOOLS, "tools", "Named commands");
@@ -27,7 +28,7 @@ struct Arguments {
     workers: usize,
 }
 
-async fn named(_: Arguments) -> anyhow::Result<()> {
+async fn named(_: Arguments, _: Shutdown) -> anyhow::Result<()> {
     panic!("parsing must not run handlers");
 }
 
@@ -40,7 +41,7 @@ fairway_cli::command!(TOOLS, "alpha", "First command", named, workers = workers)
 fairway_cli::command!(TOOLS, "middle", "Middle command", named, workers = workers);
 fairway_cli::command!(TOOLS, "zulu", "Last command", named, workers = workers);
 
-async fn own() -> anyhow::Result<()> {
+async fn own(_: Shutdown) -> anyhow::Result<()> {
     panic!("parsing must not run handlers");
 }
 fairway_cli::command!(FIRST, "First handler", own, workers = 2);

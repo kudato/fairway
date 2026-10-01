@@ -206,7 +206,7 @@ fn plugins_register_and_application_tests_reject_conflicts() {
         (
             r#"
 fw::namespace!(CLI, "sample", "Sample");
-async fn run() -> anyhow::Result<()> { Ok(()) }
+async fn run(_: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
 fw::command!(CLI, "Own", run);
 fw::command!(CLI, "named", "Named", run);
 "#,
@@ -215,7 +215,7 @@ fw::command!(CLI, "named", "Named", run);
         (
             r#"
 fw::namespace!(CLI, "sample", "Sample");
-async fn run() -> anyhow::Result<()> { Ok(()) }
+async fn run(_: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
 fw::command!(CLI, "named", "Named", run);
 fw::command!(CLI, "Own", run);
 "#,
@@ -224,7 +224,7 @@ fw::command!(CLI, "Own", run);
         (
             r#"
 fw::namespace!(CLI, "sample", "Sample");
-async fn run() -> anyhow::Result<()> { Ok(()) }
+async fn run(_: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
 fw::command!(CLI, "First", run);
 fw::command!(CLI, "Second", run);
 "#,
@@ -233,8 +233,25 @@ fw::command!(CLI, "Second", run);
         (
             r#"
 fw::namespace!(CLI, "sample", "Sample");
-async fn run(_: String) -> anyhow::Result<()> { Ok(()) }
+async fn run(_: String, _: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
 fw::command!(CLI, "Bad arguments", run);
+"#,
+            "Handler",
+        ),
+        (
+            r#"
+fw::namespace!(CLI, "sample", "Sample");
+async fn run() -> anyhow::Result<()> { Ok(()) }
+fw::command!(CLI, "Missing shutdown", run);
+"#,
+            "Handler",
+        ),
+        (
+            r#"
+fw::namespace!(CLI, "sample", "Sample");
+#[derive(clap::Args)] struct Args {}
+async fn run(_: Args) -> anyhow::Result<()> { Ok(()) }
+fw::command!(CLI, "run", "Missing shutdown after arguments", run);
 "#,
             "Handler",
         ),
@@ -250,7 +267,7 @@ fw::command!(CLI, "Wrong argument order", run);
         (
             r#"
 fw::namespace!(CLI, "sample", "Sample");
-async fn run() {}
+async fn run(_: fw::Shutdown) {}
 fw::command!(CLI, "Wrong result", run);
 "#,
             "Handler",
@@ -258,7 +275,7 @@ fw::command!(CLI, "Wrong result", run);
         (
             r#"
 fw::namespace!(CLI, "sample", "Sample");
-fn run() -> anyhow::Result<()> { Ok(()) }
+fn run(_: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
 fw::command!(CLI, "Synchronous handler", run);
 "#,
             "Handler",
@@ -266,7 +283,7 @@ fw::command!(CLI, "Synchronous handler", run);
         (
             r#"
 fw::namespace!(CLI, "sample", "Sample");
-async fn run() -> anyhow::Result<()> {
+async fn run(_: fw::Shutdown) -> anyhow::Result<()> {
     let local = std::rc::Rc::new(1);
     std::future::pending::<()>().await;
     drop(local);
@@ -280,7 +297,7 @@ fw::command!(CLI, "Non-Send future", run);
             r#"
 fw::namespace!(CLI, "sample", "Sample");
 #[derive(clap::Args)] struct Args { #[arg(long)] workers: String }
-async fn run(_: Args) -> anyhow::Result<()> { Ok(()) }
+async fn run(_: Args, _: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
 fw::command!(CLI, "Wrong worker count", run, workers = |args: &Args| args.workers.clone());
 "#,
             "usize",
@@ -304,7 +321,7 @@ fw::command!(CLI, "Wrong worker count", run, workers = |args: &Args| args.worker
         (
             r#"
 fw::namespace!(CLI, "sample", "Sample");
-async fn run() -> anyhow::Result<()> { Ok(()) }
+async fn run(_: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
 mod first {
     use super::CLI;
     fw::command!(CLI, "duplicate", "First", super::run);
@@ -324,7 +341,7 @@ struct Args {
     #[arg(long = "value")] first: String,
     #[arg(long = "value")] second: String,
 }
-async fn run(_: Args) -> anyhow::Result<()> { Ok(()) }
+async fn run(_: Args, _: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
 fw::command!(CLI, "run", "Bad options", run);
 "#,
             "Long option names must be unique",
@@ -344,7 +361,7 @@ fw::namespace!(CLI, "sample", "Sample");
 fw::namespace!(OTHER, "another", "Another namespace");
 #[derive(clap::Args)]
 struct Args { #[arg(long)] workers: usize }
-async fn run(_: Args) -> anyhow::Result<()> { panic!("handler must not run in validation") }
+async fn run(_: Args, _: fw::Shutdown) -> anyhow::Result<()> { panic!("handler must not run in validation") }
 fw::command!(CLI, "run", "Run", run, workers = |_: &Args| -> usize {
     panic!("worker selector must not run in validation")
 });

@@ -47,12 +47,17 @@ macro_rules! namespace {
 /// a compile error. Duplicate subcommand names are checked by the
 /// application's registry test.
 ///
+/// The handler takes [`Shutdown`](crate::Shutdown), optionally preceded by
+/// arguments implementing `clap::Args`, and returns `anyhow::Result<()>`.
+///
 /// `workers = N` requests N Tokio worker threads from Fairway; zero uses
 /// the available parallelism. Without `workers`, Fairway runs the command
 /// on one execution thread. A selector such as `workers = |args: &Serve|
 /// args.workers` reads the parsed arguments before Fairway creates the runtime.
 ///
 /// ```
+/// use fairway_cli::Shutdown;
+///
 /// fairway_cli::namespace!(CLI, "text", "Text commands");
 ///
 /// #[derive(clap::Args)]
@@ -61,7 +66,10 @@ macro_rules! namespace {
 ///     text: String,
 /// }
 ///
-/// async fn upper(args: Upper) -> anyhow::Result<()> {
+/// async fn upper(args: Upper, shutdown: Shutdown) -> anyhow::Result<()> {
+///     if shutdown.is_requested() {
+///         return Ok(());
+///     }
 ///     println!("{}", args.text.to_uppercase());
 ///     Ok(())
 /// }

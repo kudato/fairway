@@ -162,7 +162,7 @@ mod tests {
     crate::namespace!(TEXT, "text", "Text commands");
     crate::namespace!(HELLO, "hello", "Greeting");
 
-    async fn run() -> anyhow::Result<()> {
+    async fn run(_: crate::Shutdown) -> anyhow::Result<()> {
         Ok(())
     }
     crate::command!(TEXT, "upper", "Uppercase text", run);

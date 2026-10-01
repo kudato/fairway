@@ -15,9 +15,14 @@
 ```rust
 // src/lib.rs
 
+use fairway_cli::Shutdown;
+
 fairway_cli::namespace!(CLI, "hello", "Print a greeting");
 
-async fn hello() -> anyhow::Result<()> {
+async fn hello(shutdown: Shutdown) -> anyhow::Result<()> {
+    if shutdown.is_requested() {
+        return Ok(());
+    }
     println!("Hello, world!");
     Ok(())
 }
@@ -43,6 +48,8 @@ Hello, world!
 ```rust
 // src/lib.rs
 
+use fairway_cli::Shutdown;
+
 fairway_cli::namespace!(CLI, "text", "Text commands");
 
 #[derive(clap::Args)]
@@ -61,13 +68,19 @@ struct Repeat {
     times: usize,
 }
 
-async fn upper(args: Upper) -> anyhow::Result<()> {
+async fn upper(args: Upper, shutdown: Shutdown) -> anyhow::Result<()> {
+    if shutdown.is_requested() {
+        return Ok(());
+    }
     println!("{}", args.text.to_uppercase());
     Ok(())
 }
 
-async fn repeat(args: Repeat) -> anyhow::Result<()> {
+async fn repeat(args: Repeat, shutdown: Shutdown) -> anyhow::Result<()> {
     for _ in 0..args.times {
+        if shutdown.is_requested() {
+            break;
+        }
         println!("{}", args.text);
     }
     Ok(())
@@ -90,8 +103,11 @@ hello
 
 ## Потоки и завершение работы
 
-Обработчик может дополнительно принимать `Shutdown` — уведомление
-о запросе завершения. `requested().await` ожидает этот запрос.
+`Shutdown` передаётся последним параметром обработчика.
+`requested().await` ожидает запрос завершения.
+
+Разработчик плагина обязан реализовать обработку запроса завершения
+через `Shutdown`.
 
 `workers = N` задаёт число рабочих потоков Tokio; `0` — по доступным ядрам.
 Для выбора из аргументов передайте функцию: `workers = |args: &Serve| args.workers`.
@@ -169,8 +185,6 @@ $ fairway http serve --listen 127.0.0.1:9000 --workers 4
 Обработчик — `async fn` с результатом `anyhow::Result<()>` и `Send`-future.
 Допустимые параметры:
 
-- `()`.
-- `(args: T)`.
 - `(shutdown: Shutdown)`.
 - `(args: T, shutdown: Shutdown)`.
 

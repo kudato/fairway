@@ -21,7 +21,7 @@ fn recorded(value: &str) -> bool {
     OUTPUT.lock().unwrap().iter().any(|item| item == value)
 }
 
-async fn hello() -> anyhow::Result<()> {
+async fn hello(_: Shutdown) -> anyhow::Result<()> {
     note("hello");
     Ok(())
 }
@@ -36,7 +36,7 @@ struct Repeat {
     times: usize,
 }
 
-async fn repeat(args: Repeat) -> anyhow::Result<()> {
+async fn repeat(args: Repeat, _: Shutdown) -> anyhow::Result<()> {
     note(args.text.repeat(args.times));
     Ok(())
 }
@@ -57,12 +57,12 @@ async fn both(args: Repeat, shutdown: Shutdown) -> anyhow::Result<()> {
 }
 fairway_cli::command!(CLI, "both", "Arguments and shutdown", both);
 
-async fn fail() -> anyhow::Result<()> {
+async fn fail(_: Shutdown) -> anyhow::Result<()> {
     anyhow::bail!("command failed");
 }
 fairway_cli::command!(CLI, "fail", "Return an error", fail);
 
-async fn flavor() -> anyhow::Result<()> {
+async fn flavor(_: Shutdown) -> anyhow::Result<()> {
     let handle = tokio::runtime::Handle::current();
     note(format!(
         "{:?}:{}",
@@ -81,8 +81,8 @@ struct Pool {
     workers: usize,
 }
 
-async fn pool(_: Pool) -> anyhow::Result<()> {
-    flavor().await
+async fn pool(_: Pool, shutdown: Shutdown) -> anyhow::Result<()> {
+    flavor(shutdown).await
 }
 fairway_cli::command!(
     CLI,
@@ -95,7 +95,7 @@ fairway_cli::command!(
 mod sibling {
     use super::CLI as ALIAS;
 
-    async fn upper() -> anyhow::Result<()> {
+    async fn upper(_: fairway_cli::Shutdown) -> anyhow::Result<()> {
         super::note("sibling");
         Ok(())
     }

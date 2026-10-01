@@ -1,4 +1,4 @@
-//! Type-checked adapters for the four supported handler signatures.
+//! Type-checked adapters for handlers with a shutdown observer.
 #![allow(
     missing_docs,
     unreachable_pub,
@@ -54,8 +54,6 @@ impl PreparedCommand {
 
 // Distinct markers avoid overlapping Fn implementations. Rust infers
 // the marker from the handler's signature.
-pub struct NoArguments;
-pub struct Arguments;
 pub struct ShutdownOnly;
 pub struct ArgumentsAndShutdown;
 
@@ -65,47 +63,6 @@ pub trait Handler<Signature>: 'static {
     fn augment(command: clap::Command) -> clap::Command;
     fn parse(matches: &mut ArgMatches) -> Result<Self::Args, clap::Error>;
     fn start(self, args: Self::Args, shutdown: Shutdown) -> CommandFuture;
-}
-
-impl<F, Fut> Handler<NoArguments> for F
-where
-    F: FnOnce() -> Fut + 'static,
-    Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
-{
-    type Args = ();
-
-    fn augment(command: clap::Command) -> clap::Command {
-        command
-    }
-
-    fn parse(_: &mut ArgMatches) -> Result<(), clap::Error> {
-        Ok(())
-    }
-
-    fn start(self, (): (), _: Shutdown) -> CommandFuture {
-        Box::pin(self())
-    }
-}
-
-impl<T, F, Fut> Handler<(Arguments, T)> for F
-where
-    T: Args + 'static,
-    F: FnOnce(T) -> Fut + 'static,
-    Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
-{
-    type Args = T;
-
-    fn augment(command: clap::Command) -> clap::Command {
-        T::augment_args(command)
-    }
-
-    fn parse(matches: &mut ArgMatches) -> Result<T, clap::Error> {
-        T::from_arg_matches_mut(matches)
-    }
-
-    fn start(self, args: T, _: Shutdown) -> CommandFuture {
-        Box::pin(self(args))
-    }
 }
 
 impl<F, Fut> Handler<ShutdownOnly> for F

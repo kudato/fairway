@@ -15,9 +15,14 @@ to a handler.
 ```rust
 // src/lib.rs
 
+use fairway_cli::Shutdown;
+
 fairway_cli::namespace!(CLI, "hello", "Print a greeting");
 
-async fn hello() -> anyhow::Result<()> {
+async fn hello(shutdown: Shutdown) -> anyhow::Result<()> {
+    if shutdown.is_requested() {
+        return Ok(());
+    }
     println!("Hello, world!");
     Ok(())
 }
@@ -43,6 +48,8 @@ the handler receives a value of that type.
 ```rust
 // src/lib.rs
 
+use fairway_cli::Shutdown;
+
 fairway_cli::namespace!(CLI, "text", "Text commands");
 
 #[derive(clap::Args)]
@@ -61,13 +68,19 @@ struct Repeat {
     times: usize,
 }
 
-async fn upper(args: Upper) -> anyhow::Result<()> {
+async fn upper(args: Upper, shutdown: Shutdown) -> anyhow::Result<()> {
+    if shutdown.is_requested() {
+        return Ok(());
+    }
     println!("{}", args.text.to_uppercase());
     Ok(())
 }
 
-async fn repeat(args: Repeat) -> anyhow::Result<()> {
+async fn repeat(args: Repeat, shutdown: Shutdown) -> anyhow::Result<()> {
     for _ in 0..args.times {
+        if shutdown.is_requested() {
+            break;
+        }
         println!("{}", args.text);
     }
     Ok(())
@@ -90,8 +103,10 @@ hello
 
 ## Threads and shutdown
 
-A handler can also accept `Shutdown`, a notification of a shutdown request.
-`requested().await` waits for that request.
+`Shutdown` is passed as the handler's last parameter.
+`requested().await` waits for a shutdown request.
+
+Plugin developers must handle shutdown requests received through `Shutdown`.
 
 `workers = N` sets the number of Tokio worker threads; `0` uses the available cores.
 To choose the count from arguments, pass a function: `workers = |args: &Serve| args.workers`.
@@ -169,8 +184,6 @@ provide CLI parameter descriptions.
 A handler is an `async fn` returning `anyhow::Result<()>` with a `Send` future.
 Supported parameters:
 
-- `()`.
-- `(args: T)`.
 - `(shutdown: Shutdown)`.
 - `(args: T, shutdown: Shutdown)`.
 
