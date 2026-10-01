@@ -28,6 +28,10 @@ impl Namespace {
 const fn valid_name(name: &str) {
     assert!(!name.is_empty(), "a CLI name cannot be empty");
     let bytes = name.as_bytes();
+    assert!(
+        !matches!(bytes, b"help"),
+        "the CLI name `help` is reserved for built-in help"
+    );
     let mut i = 0;
     while i < bytes.len() {
         assert!(

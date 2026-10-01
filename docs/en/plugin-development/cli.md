@@ -171,6 +171,9 @@ The check covers the plugins and Cargo features included in that build;
 a second handler for the namespace itself causes a compilation error.
 Names must be nonempty and contain no whitespace or control characters.
 
+The name `help` is reserved for built-in help. A namespace or subcommand
+with this name is a compile error.
+
 ### Help
 
 `fairway-cli` automatically generates `--help` output for the application,

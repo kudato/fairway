@@ -4,6 +4,7 @@
 ///
 /// Namespace names must be unique across the linked application.
 /// The application's registry test checks this.
+/// The name `help` is reserved for built-in help and is a compile error.
 ///
 /// ```
 /// fairway_cli::namespace!(CLI, "text", "Text commands");
@@ -46,6 +47,7 @@ macro_rules! namespace {
 /// A namespace supports one of these forms, never both; mixing them is
 /// a compile error. Duplicate subcommand names are checked by the
 /// application's registry test.
+/// The subcommand name `help` is reserved for built-in help and is a compile error.
 ///
 /// The handler takes [`Shutdown`](crate::Shutdown), optionally preceded by
 /// arguments implementing `clap::Args`, and returns `anyhow::Result<()>`.

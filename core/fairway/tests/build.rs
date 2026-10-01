@@ -316,6 +316,33 @@ fw::command!(CLI, "Wrong worker count", run, workers = |args: &Args| args.worker
         rejected(fixture.build(false), diagnostic);
     }
 
+    // Check the name's value, including raw and escaped string literals,
+    // and point to the declaration in both build profiles.
+    let cases = [
+        (
+            r#"fw::namespace!(CLI, r"help", "Reserved namespace");"#,
+            "fw::namespace!",
+        ),
+        (
+            r#"
+fw::namespace!(CLI, "sample", "Sample");
+async fn run(_: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
+fw::command!(CLI, "h\u{65}lp", "Reserved subcommand", run);
+"#,
+            "fw::command!",
+        ),
+    ];
+    for (source, declaration) in cases {
+        fixture.write("plugin-b/src/lib.rs", source);
+        for release in [false, true] {
+            let output = fixture.build(release);
+            let error = String::from_utf8_lossy(&output.stderr).replace('\\', "/");
+            assert!(error.contains("plugin-b/src/lib.rs:"), "{error}");
+            assert!(error.contains(declaration), "{error}");
+            rejected(output, "the CLI name `help` is reserved for built-in help");
+        }
+    }
+
     // Names and clap definitions can compile, but must fail the app's test.
     let cases = [
         (
@@ -359,6 +386,7 @@ fw::command!(CLI, "run", "Bad options", run);
 #![deny(warnings)]
 fw::namespace!(CLI, "sample", "Sample");
 fw::namespace!(OTHER, "another", "Another namespace");
+fw::namespace!(HELPERS, "help-tools", "help");
 #[derive(clap::Args)]
 struct Args { #[arg(long)] workers: usize }
 async fn run(_: Args, _: fw::Shutdown) -> anyhow::Result<()> { panic!("handler must not run in validation") }
@@ -366,6 +394,7 @@ fw::command!(CLI, "run", "Run", run, workers = |_: &Args| -> usize {
     panic!("worker selector must not run in validation")
 });
 fw::command!(OTHER, "run", "Same command name in another namespace", run);
+fw::command!(HELPERS, "helpful", "help", run);
 "#,
     );
     successful(fixture.build(false));
