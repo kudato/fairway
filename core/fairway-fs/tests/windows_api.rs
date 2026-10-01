@@ -60,7 +60,7 @@ async fn non_unicode_case_aliases_share_a_lock() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn distinct_unicode_names_do_not_share_a_lock() -> anyhow::Result<()> {
+async fn distinct_names_can_share_a_queue_without_changing_the_target() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let first = dir.path().join("straße");
     let second = dir.path().join("STRASSE");
@@ -71,11 +71,49 @@ async fn distinct_unicode_names_do_not_share_a_lock() -> anyhow::Result<()> {
         b"first",
         "NTFS keeps these names distinct"
     );
-    fs::edit(&first, |text: String| async move {
-        fs::write(&second, "updated".to_owned()).await?;
+    fs::edit(&first, |text: String| async {
+        assert_eq!(
+            fs::write(&second, "blocked".to_owned())
+                .await
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::WouldBlock
+        );
         Ok::<_, fs::Error>(text)
     })
     .await?;
+    fs::write(&second, "updated".to_owned()).await?;
+    assert_eq!(std::fs::read(&first)?, b"first");
+    assert_eq!(std::fs::read(&second)?, b"updated");
+    Ok(())
+}
+
+#[tokio::test]
+async fn reservation_is_hidden_and_published_files_keep_their_attributes() -> anyhow::Result<()> {
+    use std::os::windows::fs::MetadataExt;
+    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_HIDDEN;
+
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("data");
+    fs::write(&path, "old".to_owned()).await?;
+    assert_eq!(
+        path.metadata()?.file_attributes() & FILE_ATTRIBUTE_HIDDEN,
+        0
+    );
+    fs::edit(&path, |text: String| async {
+        let attributes = directory
+            .path()
+            .join(".data.lock")
+            .metadata()?
+            .file_attributes();
+        assert_ne!(attributes & FILE_ATTRIBUTE_HIDDEN, 0);
+        Ok::<_, anyhow::Error>(text)
+    })
+    .await?;
+    assert_eq!(
+        path.metadata()?.file_attributes() & FILE_ATTRIBUTE_HIDDEN,
+        0
+    );
     Ok(())
 }
 

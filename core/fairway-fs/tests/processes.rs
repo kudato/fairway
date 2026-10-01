@@ -1,5 +1,5 @@
 //! Behavior that needs separate processes: locks shared between processes,
-//! the cleanup at startup, the Fairway directory, which each process resolves
+//! crash leftovers, the Fairway directory, which each process resolves
 //! only once, process-wide umask changes, and operations that could hang.
 //!
 //! The tests run this test binary again as a child process, in which the
@@ -229,7 +229,7 @@ fn another_process_cannot_write_until_the_first_process_finishes() -> anyhow::Re
     let runtime = runtime();
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("data");
-    let home = runtime.block_on(fs::home())?;
+    let home = directory.path().join("child-home");
     std::fs::write(&path, "old")?;
     let mut writer = Running(child("hold", &path, &home).spawn()?);
     writer.held();
@@ -266,10 +266,10 @@ fn another_process_cannot_write_until_the_first_process_finishes() -> anyhow::Re
 fn concurrent_process_edits_do_not_lose_updates() -> anyhow::Result<()> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("counter");
-    let home = directory.path().join("home");
     std::fs::write(&path, "0")?;
     let mut children = Vec::new();
-    for _ in 0..5 {
+    for index in 0..5 {
+        let home = directory.path().join(format!("home-{index}"));
         children.push(Running(child("increment", &path, &home).spawn()?));
     }
     for process in &mut children {
@@ -277,32 +277,43 @@ fn concurrent_process_edits_do_not_lose_updates() -> anyhow::Result<()> {
     }
     assert_eq!(std::fs::read_to_string(path)?, "30");
     assert_eq!(
-        std::fs::read_dir(home.join("locks"))?.count(),
+        std::fs::read_dir(directory.path())?.count(),
         1,
-        "only the permanent coordination lock remains"
+        "only the counter remains; writes do not create Fairway home directories"
     );
     Ok(())
 }
 
 #[test]
-fn startup_keeps_active_locks_and_removes_crash_leftovers() -> anyhow::Result<()> {
+fn startup_preserves_reservations_and_crash_leftovers_need_manual_removal() -> anyhow::Result<()> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("data");
     let home = directory.path().join("home");
     std::fs::write(&path, "old")?;
     let mut writer = Running(child("hold", &path, &home).spawn()?);
     writer.held();
-    // The coordination lock and the lock of `path`.
-    assert_eq!(std::fs::read_dir(home.join("locks"))?.count(), 2);
+    let reservation = directory.path().join(".data.lock");
+    assert!(reservation.is_file());
     let mut initialize = Running(child("initialize", &path, &home).spawn()?);
     initialize.wait();
-    assert_eq!(std::fs::read_dir(home.join("locks"))?.count(), 2);
+    assert!(reservation.is_file());
     writer.0.kill()?;
     writer.0.wait()?;
     let mut initialize = Running(child("initialize", &path, &home).spawn()?);
     initialize.wait();
-    assert_eq!(std::fs::read_dir(home.join("locks"))?.count(), 1);
-    assert_eq!(std::fs::read_to_string(path)?, "old");
+    assert!(reservation.is_file());
+    assert_eq!(std::fs::read_to_string(&path)?, "old");
+    assert_eq!(
+        runtime()
+            .block_on(fs::write(&path, "blocked".to_owned()))
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::WouldBlock
+    );
+    std::fs::remove_file(reservation)?;
+    runtime().block_on(fs::write(&path, "recovered".to_owned()))?;
+    assert_eq!(std::fs::read_to_string(path)?, "recovered");
+    assert!(!home.exists());
     Ok(())
 }
 

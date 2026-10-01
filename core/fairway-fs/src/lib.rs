@@ -74,40 +74,44 @@
 //! The contents are not flushed to disk before the rename, so the
 //! replacement is atomic but not durable: after a power failure or an
 //! operating system crash, the new contents may be lost. If the process is
-//! killed in the middle of a replacement, a temporary file whose name starts
-//! with `.fairway-` may be left next to the target.
+//! killed in the middle of a replacement, its adjacent lock file may remain.
+//! After checking that no operation is using it, remove it to allow further
+//! writes and edits.
 //!
 //! # Locking
 //!
-//! [`write`] and [`edit`] lock the target path for the whole operation, so
-//! two Fairway operations never replace the same file at once, and
-//! concurrent edits of a file are applied one after another without losing
-//! updates. The lock works both between tasks of one process and between
-//! processes. [`edit`] waits for it without a time limit: within a process,
-//! waiting edits of a path proceed in the order in which they started
-//! waiting, while a lock held by another process is polled periodically, so
-//! waiters from different processes are not ordered. [`write`] does not wait
-//! and fails with [`WouldBlock`](io::ErrorKind::WouldBlock) if the path is
-//! locked. [`read`] does not use the lock at all; thanks to the atomic
-//! replacement, it never sees a partially written file.
+//! [`write`] and [`edit`] reserve the target by exclusively creating an
+//! adjacent file: `report.txt` uses `.report.txt.lock`. The reservation is
+//! taken before reading or encoding, and the replacement contents are written
+//! to this same file. Renaming it over the target publishes the result and
+//! releases the reservation. Processes coordinate independently of
+//! `FAIRWAY_HOME`. Other programs can still change the target at any time.
 //!
-//! When [`write`] or [`edit`] returns, successfully or with an error, the
-//! lock has already been released. Only after a cancellation (see below) or
-//! a panic is it released in the background, once the remaining work has
-//! finished.
+//! Within a process, operations also share a queue keyed by the canonical
+//! path's Unicode normalization and full case folding. Waiting [`edit`] calls
+//! in one queue proceed in the order in which they started waiting. Different
+//! queues can run concurrently; the adjacent file provides mutual exclusion
+//! if more than one queue addresses the same target. Queues in different
+//! processes have no shared ordering.
 //!
-//! The lock is advisory and only coordinates Fairway operations: other
-//! programs can still change the file at any time. Processes share locks
-//! only if they use the same Fairway directory, which the `FAIRWAY_HOME`
-//! environment variable selects (see [`home`]); the lock files are kept in
-//! its `locks` subdirectory.
+//! [`edit`] waits without a time limit, polling an occupied adjacent name.
+//! [`write`] tries once and returns [`WouldBlock`](io::ErrorKind::WouldBlock)
+//! if the queue or the adjacent name is occupied. Different files with names
+//! equivalent under normalization and case folding can share a queue, so a
+//! write can also be busy while another file in that queue is being changed.
+//! [`read`] uses neither the queue nor the reservation and sees one complete
+//! version of the file thanks to the atomic replacement.
 //!
-//! Paths are compared after symbolic links in their parent directories are
-//! resolved, and on Windows after 8.3 short names are expanded, so different
-//! paths to the same file share one lock. On macOS and Windows, names that
-//! differ only in letter case share a lock if the filesystem ignores case,
-//! and on macOS, so do names that differ only in Unicode normalization. Hard
-//! links to one file are different names and are locked independently.
+//! The adjacent name is reserved for Fairway. An existing entry is left
+//! untouched, and the extra prefix and suffix must fit the filesystem's name
+//! length limit. A reservation left after a crash is not removed at startup.
+//! On Windows, the staging file is hidden; the published file receives the
+//! target's attributes, or normal attributes when the target is new.
+//!
+//! A successful return means the replacement is published and the lock is
+//! released. On error, Fairway attempts to remove its reservation before
+//! returning. After cancellation or a panic, cleanup runs in the background
+//! and holds the local queue until the remaining work has finished.
 //!
 //! # Cancellation
 //!
@@ -311,7 +315,7 @@ where
 ///
 /// Returns an error and leaves the file unchanged if:
 ///
-/// - another Fairway operation holds the lock on `path`
+/// - the path's queue or adjacent lock name is occupied
 ///   ([`WouldBlock`](io::ErrorKind::WouldBlock));
 /// - `path` does not name a file, for example because it ends with a
 ///   separator, or it names a symbolic link, a directory, or another file
@@ -324,8 +328,8 @@ where
 /// - encoding fails ([`InvalidInput`](io::ErrorKind::InvalidInput)); the
 ///   encoder's error is the [`source`](std::error::Error::source) of the
 ///   returned error;
-/// - the Fairway directory cannot be determined, or the lock file cannot be
-///   created in it (see [`home`]).
+/// - the adjacent lock file cannot be created, for example because its
+///   name exceeds the filesystem's limit.
 ///
 /// Other failures reported by the operating system, such as a full disk,
 /// keep the kind that it reported.
@@ -625,9 +629,7 @@ fn defer(work: impl FnOnce() + Send + 'static) {
 /// Hooks for the Fairway application itself; not part of the plugin API.
 #[doc(hidden)]
 pub mod __private {
-    /// Fixes the Fairway directory for the rest of the process and removes
-    /// lock files that no process holds, such as those left behind by a
-    /// process that crashed.
+    /// Fixes the Fairway directory for the rest of the process.
     ///
     /// The application calls this once at startup, before it loads the
     /// configuration, so that an unusable Fairway directory is reported
@@ -637,8 +639,7 @@ pub mod __private {
     /// # Errors
     ///
     /// Returns an error if the Fairway directory cannot be determined (see
-    /// [`home`](fn@crate::home)), or if its `locks` subdirectory cannot be
-    /// inspected or cleaned.
+    /// [`home`](fn@crate::home)).
     pub fn initialize() -> Result<(), crate::Error> {
         crate::home::initialize()
     }

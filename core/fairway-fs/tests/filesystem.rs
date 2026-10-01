@@ -167,6 +167,44 @@ impl Encode for Invalid {
 }
 
 #[tokio::test]
+async fn an_existing_reservation_is_preserved_and_skips_encoding() -> anyhow::Result<()> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("data");
+    let reservation = directory.path().join(".data.lock");
+    std::fs::write(&path, "old")?;
+    std::fs::write(&reservation, "another operation")?;
+    assert_eq!(
+        fs::write(&path, Invalid).await.unwrap_err().kind(),
+        io::ErrorKind::WouldBlock
+    );
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(80),
+            fs::edit(&path, |_: String| async {
+                panic!("a reserved file must not reach the handler");
+                #[allow(unreachable_code)]
+                Ok::<_, fs::Error>(String::new())
+            })
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(std::fs::read(&reservation)?, b"another operation");
+    assert_eq!(std::fs::read(&path)?, b"old");
+    std::fs::remove_file(reservation)?;
+    // A cancelled blocking attempt can still be leaving the local queue.
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        fs::edit(&path, |_: String| async {
+            Ok::<_, fs::Error>("after".to_owned())
+        }),
+    )
+    .await??;
+    assert_eq!(std::fs::read(&path)?, b"after");
+    Ok(())
+}
+
+#[tokio::test]
 async fn readonly_files_reject_writes_before_encoding_or_editing() -> anyhow::Result<()> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("readonly");

@@ -7,45 +7,6 @@ use std::{
     path::Path,
 };
 
-/// Returns the canonical form of the directory path `path`, with all symbolic
-/// links resolved.
-///
-/// On macOS, the result also has the letter case that the filesystem stores,
-/// so that different spellings of one directory give the same path on a
-/// filesystem that ignores case.
-pub(crate) fn canonical_parent(path: &Path) -> Result<std::path::PathBuf> {
-    #[cfg(target_os = "macos")]
-    {
-        unix::canonical_parent(path)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        std::fs::canonicalize(path).map_err(Cause::from)
-    }
-}
-
-/// Returns the key under which `path`, a target returned by
-/// [`lock::target`](crate::lock::target), is locked.
-///
-/// On macOS and Windows, the file name is converted to upper case if the
-/// filesystem ignores case, and on macOS it is also brought to one Unicode
-/// normalization form, so that all spellings of the name share a lock.
-/// Elsewhere the key is the path itself.
-pub(crate) fn lock_key(path: &Path) -> Result<std::path::PathBuf> {
-    #[cfg(target_os = "macos")]
-    {
-        unix::lock_key(path)
-    }
-    #[cfg(windows)]
-    {
-        windows::lock_key(path)
-    }
-    #[cfg(not(any(target_os = "macos", windows)))]
-    {
-        Ok(path.to_owned())
-    }
-}
-
 use crate::{Error, Operation, error::Cause};
 
 /// The result of a step whose error still lacks the operation and the path;
@@ -60,7 +21,7 @@ mod windows;
 #[cfg(unix)]
 pub(crate) use unix::copy_metadata;
 #[cfg(windows)]
-pub(crate) use windows::{canonical_target, copy_metadata};
+pub(crate) use windows::{copy_metadata, finish_new_file};
 
 /// Checks that `path` is a regular file and not a symbolic link, and returns
 /// whether it exists; a missing file is an error only if it is `required`.
@@ -113,25 +74,35 @@ pub(crate) fn open_original(
     Ok(Some(file))
 }
 
-/// Opens the lock file at `path`, creating it if needed; a symbolic link or
-/// anything else that is not a regular file is rejected.
-pub(crate) fn lock_file(path: &Path) -> Result<File> {
+/// Creates the empty adjacent reservation, also used as the output file.
+pub(crate) fn create_lock(path: &Path) -> io::Result<File> {
     let mut options = OpenOptions::new();
-    options.read(true).write(true).create(true).truncate(false);
-    no_follow(&mut options);
+    options.read(true).write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
+        options.mode(0o666);
     }
-    let file = options.open(path)?;
-    if !file.metadata()?.is_file() {
-        return Err(Cause::Message(
-            io::ErrorKind::InvalidInput,
-            "invalid lock file",
-        ));
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.attributes(windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_HIDDEN);
     }
-    Ok(file)
+    options.open(path)
+}
+
+/// Makes an existing file's replacement private before any data is written.
+/// A new file keeps the creation mode, including the process umask and the
+/// parent directory's inherited permissions.
+pub(crate) fn prepare_output(file: &File, replacing: bool) -> io::Result<()> {
+    #[cfg(unix)]
+    if replacing {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    #[cfg(not(unix))]
+    let _ = (file, replacing);
+    Ok(())
 }
 
 /// Keeps `options` from following a symbolic link at the end of the path.

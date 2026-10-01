@@ -1,167 +1,119 @@
-//! Locks that make replacements of a path take turns, within a process and
-//! between processes.
+//! Per-key FIFO queues and adjacent files that reserve a replacement.
 //!
-//! A lock has two levels. Within a process, each path has a gate, a Tokio
-//! mutex: [`edit`](crate::edit) waits for it, and because Tokio's mutex is
-//! fair, waiting edits proceed in the order in which they started waiting;
-//! [`write`](crate::write) only tries it. Between processes, the holder of
-//! the gate locks a file in the `locks` subdirectory of the Fairway directory
-//! with [`File::try_lock`]. While another process holds that file, a waiting
-//! operation tries again every [`RETRY`], so waiters from different processes
-//! are not ordered.
-//!
-//! A lock file is named after the digest of the path's key and is deleted
-//! when the lock is released, so that the directory does not keep a file for
-//! every path ever locked. Deleting races with opening: a process could open
-//! the file just before another one deletes it, then lock the deleted file,
-//! while a third process creates and locks a new file under the same name,
-//! and both would hold the lock. Therefore a lock file is opened and locked,
-//! and deleted, only under the coordination lock, `.coordination.lock` in the
-//! same directory. Lock files left behind by a process that crashed are
-//! removed by [`clean_stale`].
+//! A process queues operations by a normalized path key. The operation at
+//! the front creates `.<name>.lock` exclusively, before reading the target.
+//! That file also holds the replacement contents. Renaming it over the target
+//! publishes the result and releases the reservation between processes.
 
 use std::{
     collections::HashMap,
-    fs::{File, TryLockError},
+    ffi::OsString,
+    fs::File,
     io,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, OnceLock, Weak},
     time::Duration,
 };
 
+use caseless::Caseless;
 use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
+use unicode_normalization::UnicodeNormalization;
 
-use crate::{Error, Operation, error::Cause};
+use crate::{Error, Operation};
 
-type Gates = Mutex<HashMap<PathBuf, Weak<AsyncMutex<()>>>>;
+type Key = [u8; 32];
+type Gates = Mutex<HashMap<Key, Weak<AsyncMutex<()>>>>;
 
-/// The gates of this process by lock key. They are held weakly, so a gate
-/// exists only while an operation holds it or waits for it.
+/// Queues live as long as an operation holds them or waits for them.
 static GATES: OnceLock<Gates> = OnceLock::new();
 
-/// The canonical path of the lock directory, set once the directory has been
-/// created and cleaned. A failure is not stored, so the next lock tries again.
-static DIRECTORY: Mutex<Option<PathBuf>> = Mutex::new(None);
-
-/// How often a waiting operation tries again to lock a file that another
-/// process holds.
+/// Interval between attempts to reserve a path held by another process.
 const RETRY: Duration = Duration::from_millis(25);
 
-/// A lock on a path, held at both levels.
-///
-/// [`release`](FileLock::release) releases it on the calling thread; dropping
-/// it releases it in the background.
+/// Owns the adjacent file and the local queue until publication or cleanup.
 pub(crate) struct FileLock(Option<Lease>);
 
-/// The resources of a held lock.
 struct Lease {
-    /// The locked file.
-    file: File,
-    path: PathBuf,
-    directory: PathBuf,
-    /// The guard of the gate. It is shared with the attempt that may still be
-    /// running on a blocking thread, so that no other operation of this
-    /// process passes the gate while a cancelled wait can still take the lock
-    /// file.
+    file: Option<File>,
+    path: Option<PathBuf>,
+    /// A blocking attempt can outlive the future awaiting it. Keep its place
+    /// in the local queue until that attempt and its cleanup have finished.
     _local: Arc<OwnedMutexGuard<()>>,
 }
 
-/// Returns the path that [`write`](crate::write) and [`edit`](crate::edit)
-/// lock and replace when given the absolute `path`.
-///
-/// The path must name a file, so an ending of `/` or `/.` is rejected,
-/// although [`Path::file_name`] ignores it; on Windows, `\` and `\.` as well.
-/// Symbolic links in the parent directories are resolved, so different paths
-/// to one file give the same target and share its lock. The last component is
-/// kept as it is: the file may not exist yet, and a symbolic link must not be
-/// followed but rejected by the replacement. On Windows, an 8.3 short name of
-/// the last component is expanded.
-///
-/// # Errors
-///
-/// Returns an error of [`Operation::ValidateTarget`] if `path` does not name
-/// a file, and of [`Operation::Canonicalize`] if the parent directory cannot
-/// be resolved, for example because it does not exist.
+/// Resolves the absolute target, rejecting a final symbolic link or a path
+/// that does not name a regular file. A new file uses its canonical parent.
 pub(crate) async fn target(path: PathBuf) -> Result<PathBuf, Error> {
     super::blocking(Operation::Canonicalize, Some(path.clone()), move || {
-        let name = path.file_name().ok_or_else(|| {
+        let invalid = || {
             Error::message(
                 Operation::ValidateTarget,
                 Some(&path),
                 io::ErrorKind::InvalidInput,
                 "the target must name a file",
             )
-        })?;
-        let parent = path.parent().ok_or_else(|| {
-            Error::message(
-                Operation::ValidateTarget,
-                Some(&path),
-                io::ErrorKind::InvalidInput,
-                "the target has no parent",
-            )
-        })?;
+        };
+        let name = path.file_name().ok_or_else(invalid)?;
+        let parent = path.parent().ok_or_else(invalid)?;
         if path.as_os_str().as_encoded_bytes().ends_with(b"/")
             || path.as_os_str().as_encoded_bytes().ends_with(b"/.")
             || cfg!(windows)
                 && (path.as_os_str().as_encoded_bytes().ends_with(b"\\")
                     || path.as_os_str().as_encoded_bytes().ends_with(b"\\."))
         {
-            return Err(Error::message(
-                Operation::ValidateTarget,
-                Some(&path),
-                io::ErrorKind::InvalidInput,
-                "the target must name a file",
-            ));
+            return Err(invalid());
         }
-        let target = super::platform::canonical_parent(parent)
-            .map_err(|cause| Error::new(Operation::Canonicalize, Some(&path), cause))?
+        let target = std::fs::canonicalize(parent)
+            .map_err(|source| Error::io(Operation::Canonicalize, Some(&path), source))?
             .join(name);
-        #[cfg(windows)]
-        let target = super::platform::canonical_target(target)
-            .map_err(|cause| Error::new(Operation::Canonicalize, Some(&path), cause))?;
-        Ok(target)
+        if super::platform::check_target(&target, false)? {
+            std::fs::canonicalize(&target)
+                .map_err(|source| Error::io(Operation::Canonicalize, Some(&target), source))
+        } else {
+            Ok(target)
+        }
     })
     .await
 }
 
-/// Locks `target`, a path returned by [`target`].
-///
-/// If `wait` is set, the call waits until the lock is free; otherwise it fails
-/// if the lock is held.
-///
-/// # Errors
-///
-/// Returns an error of kind [`WouldBlock`](io::ErrorKind::WouldBlock) if the
-/// lock is held and `wait` is not set. Also returns an error if the Fairway
-/// directory cannot be determined, or if the lock directory or a lock file
-/// cannot be used.
-pub(crate) async fn acquire(target: &Path, wait: bool) -> Result<FileLock, Error> {
-    let path = target.to_owned();
-    let key = super::blocking(Operation::Lock, Some(path.clone()), move || {
-        super::platform::lock_key(&path)
-            .map_err(|cause| Error::new(Operation::Lock, Some(&path), cause))
-    })
-    .await?;
-    acquire_key(key, target, wait).await
+/// Hashes canonical caseless Unicode text, preserving non-Unicode native
+/// path bytes between text fragments. The resulting key is only used in memory.
+fn key(path: &Path) -> Key {
+    let mut digest = Sha256::new();
+    for chunk in path.as_os_str().as_encoded_bytes().utf8_chunks() {
+        let text: String = chunk.valid().nfd().default_case_fold().nfd().collect();
+        digest.update(text.as_bytes());
+        digest.update(chunk.invalid());
+    }
+    digest.finalize().into()
 }
 
-/// Implements [`acquire`] for the lock `key` of `target`, which is used only
-/// in errors.
-async fn acquire_key(key: PathBuf, target: &Path, wait: bool) -> Result<FileLock, Error> {
+fn adjacent(target: &Path) -> PathBuf {
+    let mut name = OsString::from(".");
+    name.push(target.file_name().expect("normalized target"));
+    name.push(".lock");
+    target.with_file_name(name)
+}
+
+/// Waits for the local queue and the adjacent file, or tries both once when
+/// `wait` is false. An existing adjacent file is never opened or removed here.
+pub(crate) async fn acquire(target: &Path, wait: bool) -> Result<FileLock, Error> {
+    acquire_key(key(target), target, wait).await
+}
+
+async fn acquire_key(key: Key, target: &Path, wait: bool) -> Result<FileLock, Error> {
     let gate = {
         let mut gates = GATES
             .get_or_init(Mutex::default)
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        // Remove the entries of gates that no longer exist, so that the map does
-        // not grow with every path ever locked.
         gates.retain(|_, value| value.strong_count() != 0);
         match gates.get(&key).and_then(Weak::upgrade) {
             Some(gate) => gate,
             None => {
                 let gate = Arc::new(AsyncMutex::new(()));
-                gates.insert(key.clone(), Arc::downgrade(&gate));
+                gates.insert(key, Arc::downgrade(&gate));
                 gate
             }
         }
@@ -171,51 +123,20 @@ async fn acquire_key(key: PathBuf, target: &Path, wait: bool) -> Result<FileLock
     } else {
         gate.try_lock_owned().map_err(|_| busy(target))?
     });
-    let directory_target = target.to_owned();
-    let directory = super::blocking(Operation::Lock, Some(directory_target.clone()), move || {
-        directory(&directory_target)
-    })
-    .await?;
-    // A key can be long and contain any character, so the file is named after
-    // its digest instead.
-    let digest = Sha256::digest(key.as_os_str().as_encoded_bytes());
-    let mut name = String::with_capacity(69);
-    for byte in digest {
-        use std::fmt::Write;
-        write!(&mut name, "{byte:02x}").expect("writing to a String");
-    }
-    name.push_str(".lock");
     loop {
-        let directory = directory.clone();
-        let path = directory.join(&name);
+        let path = adjacent(target);
         let local = local.clone();
         let attempt_target = target.to_owned();
         let attempt = super::blocking(Operation::Lock, Some(attempt_target.clone()), move || {
-            let result = (|| {
-                let _coordination = coordination(&directory)?;
-                let file = super::platform::lock_file(&path)?;
-                match file.try_lock() {
-                    Ok(()) => Ok(Some(FileLock(Some(Lease {
-                        file,
-                        path,
-                        directory,
-                        _local: local,
-                    })))),
-                    // Close the file while the coordination lock is still held.
-                    // Once it is released, the holder may delete the file, so the
-                    // next attempt has to open the name again, which may then
-                    // refer to a new file.
-                    Err(TryLockError::WouldBlock) => {
-                        drop(file);
-                        Ok(None)
-                    }
-                    Err(TryLockError::Error(error)) => {
-                        drop(file);
-                        Err(Cause::Io(error))
-                    }
-                }
-            })();
-            result.map_err(|cause| Error::new(Operation::Lock, Some(&attempt_target), cause))
+            match super::platform::create_lock(&path) {
+                Ok(file) => Ok(Some(FileLock(Some(Lease {
+                    file: Some(file),
+                    path: Some(path),
+                    _local: local,
+                })))),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(None),
+                Err(source) => Err(Error::io(Operation::Lock, Some(&attempt_target), source)),
+            }
         })
         .await?;
         if let Some(lock) = attempt {
@@ -228,95 +149,52 @@ async fn acquire_key(key: PathBuf, target: &Path, wait: bool) -> Result<FileLock
     }
 }
 
-/// Returns the error for a lock that another operation holds.
 fn busy(path: &Path) -> Error {
     Error::message(
         Operation::Lock,
         Some(path),
         io::ErrorKind::WouldBlock,
-        "another Fairway operation is changing this path",
+        "the path's queue or adjacent lock file is occupied",
     )
 }
 
-/// Returns the lock directory, which is created and cleaned of stale lock
-/// files on first use in the process; `target` is used only in errors.
-fn directory(target: &Path) -> Result<PathBuf, Error> {
-    let mut cached = DIRECTORY.lock().unwrap_or_else(|error| error.into_inner());
-    if let Some(path) = &*cached {
-        return Ok(path.clone());
-    }
-    let path = super::home::resolved()?.join("locks");
-    std::fs::create_dir_all(&path)
-        .map_err(|source| Error::io(Operation::Lock, Some(target), source))?;
-    let path = std::fs::canonicalize(path)
-        .map_err(|source| Error::io(Operation::Lock, Some(target), source))?;
-    clean_stale(&path).map_err(|cause| Error::new(Operation::Lock, Some(target), cause))?;
-    *cached = Some(path.clone());
-    Ok(path)
-}
-
-/// Takes the coordination lock of `directory`, which is held until the
-/// returned file is closed.
-///
-/// If another process holds it, the call blocks until it is free. The lock is
-/// only held for a few filesystem calls, so the wait is short.
-fn coordination(directory: &Path) -> Result<File, Cause> {
-    let file = super::platform::lock_file(&directory.join(".coordination.lock"))?;
-    file.lock()?;
-    Ok(file)
-}
-
-/// Deletes the lock files in `directory` that no process holds, such as those
-/// of a process that crashed.
-///
-/// Only names of the form of a lock file are considered. A file is deleted
-/// while this process holds both its lock and the coordination lock, so a
-/// lock file in use is never deleted. Called when the Fairway application
-/// starts and when a process first uses the directory.
-pub(crate) fn clean_stale(directory: &Path) -> Result<(), Cause> {
-    let _coordination = coordination(directory)?;
-    for entry in std::fs::read_dir(directory)? {
-        let entry = entry?;
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else {
-            continue;
-        };
-        let Some(key) = name.strip_suffix(".lock") else {
-            continue;
-        };
-        if key.len() != 64 || !key.bytes().all(|b| b.is_ascii_hexdigit()) {
-            continue;
-        }
-        let file = super::platform::lock_file(&entry.path())?;
-        match file.try_lock() {
-            Ok(()) => std::fs::remove_file(entry.path())?,
-            Err(TryLockError::WouldBlock) => {}
-            Err(TryLockError::Error(error)) => return Err(error.into()),
-        }
-        drop(file);
-    }
-    Ok(())
-}
-
 impl Lease {
-    /// Deletes the lock file and releases the lock, and the gate after it.
-    fn release(self) {
-        // The file may be deleted only under the coordination lock. If that
-        // lock cannot be taken, the file is left for `clean_stale`; dropping
-        // `self` still closes it, which releases the lock.
-        if let Ok(_coordination) = coordination(&self.directory) {
-            let _ = std::fs::remove_file(&self.path);
-            drop(self.file);
+    fn release(mut self) {
+        drop(self.file.take());
+        if let Some(path) = self.path.take() {
+            let _ = std::fs::remove_file(path);
         }
     }
 }
 
 impl FileLock {
-    /// Releases the lock on the calling thread.
-    ///
-    /// It performs blocking I/O, so it must run on a blocking thread. The
-    /// replacement calls it there, so that the lock is free by the time
-    /// [`write`](crate::write) or [`edit`](crate::edit) returns.
+    /// Transfers the open file to the transaction; this lock retains ownership
+    /// of its name and must outlive that file handle.
+    pub(crate) fn take_file(&mut self) -> File {
+        self.0
+            .as_mut()
+            .expect("held lock")
+            .file
+            .take()
+            .expect("lock file")
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        self.0
+            .as_ref()
+            .expect("held lock")
+            .path
+            .as_deref()
+            .expect("unpublished lock")
+    }
+
+    /// The rename consumed our name. A later operation may already own a new
+    /// file there, so cleanup must no longer remove it.
+    pub(crate) fn published(&mut self) {
+        self.0.as_mut().expect("held lock").path = None;
+    }
+
+    /// Cleans up on the calling blocking thread, then releases the queue.
     pub(crate) fn release(mut self) {
         if let Some(lease) = self.0.take() {
             lease.release();
@@ -341,14 +219,75 @@ mod tests {
         task::Poll,
     };
 
+    #[test]
+    fn queue_keys_use_canonical_caseless_matching_for_the_whole_path() {
+        for (first, second) in [
+            ("Projects/Report", "projects/report"),
+            ("dir/straße", "DIR/STRAẞE"),
+            ("dir/straße", "dir/STRASSE"),
+            ("dir/xΣ", "dir/xς"),
+            ("dir/xσ", "dir/xς"),
+            ("CAFÉ/data", "cafe\u{301}/data"),
+        ] {
+            assert_eq!(
+                key(Path::new(first)),
+                key(Path::new(second)),
+                "{first} / {second}"
+            );
+        }
+        assert_ne!(key(Path::new("one/data")), key(Path::new("two/data")));
+        assert_ne!(key(Path::new("dir/cafe")), key(Path::new("dir/café")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_unicode_names_keep_their_bytes_and_fold_the_text_around_them() {
+        use std::os::unix::ffi::OsStrExt;
+        let first = Path::new(std::ffi::OsStr::from_bytes(b"dir/\xffReport"));
+        let alias = Path::new(std::ffi::OsStr::from_bytes(b"DIR/\xffREPORT"));
+        let other = Path::new(std::ffi::OsStr::from_bytes(b"dir/\xfeReport"));
+        assert_eq!(key(first), key(alias));
+        assert_ne!(key(first), key(other));
+    }
+
+    #[tokio::test]
+    async fn waiting_for_an_adjacent_file_does_not_block_other_targets() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let first = directory.path().join("first");
+        let other = directory.path().join("other");
+        let reservation = adjacent(&first);
+        std::fs::write(&reservation, "held by another process")?;
+        let mut waiting = Box::pin(acquire(&first, true));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(80), &mut waiting)
+                .await
+                .is_err()
+        );
+        let independent =
+            tokio::time::timeout(Duration::from_secs(5), acquire(&other, false)).await??;
+        super::super::blocking(Operation::Lock, Some(other), move || {
+            independent.release();
+            std::fs::remove_file(reservation).unwrap();
+            Ok(())
+        })
+        .await?;
+        let lock = tokio::time::timeout(Duration::from_secs(5), waiting).await??;
+        super::super::blocking(Operation::Lock, Some(first), move || {
+            lock.release();
+            Ok(())
+        })
+        .await?;
+        Ok(())
+    }
+
     #[tokio::test]
     async fn waiting_edits_are_fifo_and_cancelled_waiters_leave_the_queue() -> anyhow::Result<()> {
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("queue");
-        let first = acquire_key(path.clone(), &path, true).await?;
-        let mut second = pin!(acquire_key(path.clone(), &path, true));
-        let mut cancelled = Box::pin(acquire_key(path.clone(), &path, true));
-        let mut last = pin!(acquire_key(path.clone(), &path, true));
+        let first = acquire_key(key(&path), &path, true).await?;
+        let mut second = pin!(acquire_key(key(&path), &path, true));
+        let mut cancelled = Box::pin(acquire_key(key(&path), &path, true));
+        let mut last = pin!(acquire_key(key(&path), &path, true));
         // Poll each waiter once, so that they join the gate's queue in this order.
         poll_fn(|context| {
             assert!(second.as_mut().poll(context).is_pending());

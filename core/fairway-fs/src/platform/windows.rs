@@ -1,5 +1,4 @@
-//! The Windows steps: copying metadata, expanding 8.3 short names, and
-//! computing lock keys.
+//! The Windows steps for copying filesystem metadata and file attributes.
 //!
 //! Metadata is copied between open handles rather than paths, so that it
 //! cannot reach another file that has taken one of the paths in the meantime.
@@ -48,139 +47,35 @@ pub(crate) fn copy_metadata(source: &File, target: &File) -> Result<()> {
         .map_err(Cause::from)
 }
 
-/// Replaces the 8.3 short names in `path` with the long names, without
-/// following a symbolic link at the end of the path.
-///
-/// The long name is needed both for the lock, so that all spellings of the
-/// target share one, and for the rename: renaming onto the short name would
-/// replace the file's long name with it. If the target does not exist yet,
-/// `path` is returned unchanged.
-pub(crate) fn canonical_target(path: std::path::PathBuf) -> Result<std::path::PathBuf> {
-    use std::os::windows::ffi::{OsStrExt, OsStringExt};
-    use windows_sys::Win32::Storage::FileSystem::GetLongPathNameW;
-    let mut source: Vec<u16> = path.as_os_str().encode_wide().collect();
-    if source.contains(&0) {
-        return Err(Cause::Message(
-            io::ErrorKind::InvalidInput,
-            "path contains a null character",
-        ));
-    }
-    source.push(0);
-    let mut output = vec![0_u16; source.len() + 260];
-    loop {
-        // SAFETY: `source` ends with a null character, and `output` has room
-        // for the number of characters passed with it.
-        let length =
-            unsafe { GetLongPathNameW(source.as_ptr(), output.as_mut_ptr(), output.len() as u32) };
-        if length == 0 {
-            let error = io::Error::last_os_error();
-            // A target that does not exist yet has no short name to expand.
-            return if error.kind() == io::ErrorKind::NotFound {
-                Ok(path)
-            } else {
-                Err(error.into())
-            };
-        }
-        // A result that fits is shorter than the buffer. Otherwise the call
-        // returns the size it needs, which can grow again before the retry if
-        // the file is renamed.
-        if (length as usize) < output.len() {
-            output.truncate(length as usize);
-            return Ok(std::ffi::OsString::from_wide(&output).into());
-        }
-        output.resize(length as usize + 1, 0);
-    }
-}
-
-/// Implements [`super::lock_key`]: unless the directory is case-sensitive, the
-/// file name is converted to upper case by the rules of the filesystem.
-pub(super) fn lock_key(path: &std::path::Path) -> Result<std::path::PathBuf> {
-    use std::os::windows::fs::OpenOptionsExt;
+/// Removes the staging file's hidden attribute before publishing a new file.
+pub(crate) fn finish_new_file(file: &File) -> Result<()> {
+    use std::os::windows::fs::MetadataExt;
     use windows_sys::Win32::Storage::FileSystem::{
-        FILE_CASE_SENSITIVE_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_READ_ATTRIBUTES,
-        FileCaseSensitiveInfo, GetFileInformationByHandleEx,
+        FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_NORMAL, FILE_BASIC_INFO, FileBasicInfo,
+        SetFileInformationByHandle,
     };
-    let parent = path.parent().expect("normalized target");
-    let directory = std::fs::OpenOptions::new()
-        .access_mode(FILE_READ_ATTRIBUTES)
-        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
-        .open(parent)?;
-    let mut info = FILE_CASE_SENSITIVE_INFO::default();
-    // SAFETY: `directory` keeps the handle open during the call, and `info` has
-    // the size passed with it.
+    let attributes = file.metadata()?.file_attributes() & !FILE_ATTRIBUTE_HIDDEN;
+    let mut info = FILE_BASIC_INFO {
+        FileAttributes: if attributes == 0 {
+            FILE_ATTRIBUTE_NORMAL
+        } else {
+            attributes
+        },
+        ..Default::default()
+    };
+    // SAFETY: the file owns the handle, and `info` has the size passed here.
     let success = unsafe {
-        GetFileInformationByHandleEx(
-            directory.as_raw_handle(),
-            FileCaseSensitiveInfo,
-            (&mut info as *mut FILE_CASE_SENSITIVE_INFO).cast(),
+        SetFileInformationByHandle(
+            file.as_raw_handle(),
+            FileBasicInfo,
+            (&mut info as *mut FILE_BASIC_INFO).cast(),
             std::mem::size_of_val(&info) as u32,
         )
     };
     if success == 0 {
-        let error = io::Error::last_os_error();
-        // ERROR_INVALID_FUNCTION, ERROR_NOT_SUPPORTED, and
-        // ERROR_INVALID_PARAMETER mean that the Windows version or the
-        // filesystem does not support the query, and so has no case-sensitive
-        // directories.
-        if !matches!(error.raw_os_error(), Some(1 | 50 | 87)) {
-            return Err(error.into());
-        }
-    }
-    // FILE_CS_FLAG_CASE_SENSITIVE_DIR
-    if info.Flags & 1 != 0 {
-        return Ok(path.to_owned());
-    }
-    let name = path.file_name().expect("normalized target");
-    use std::os::windows::ffi::{OsStrExt, OsStringExt};
-    use windows_sys::Win32::Globalization::{LCMAP_UPPERCASE, LCMapStringEx};
-    // Without LCMAP_LINGUISTIC_CASING, LCMapStringEx converts case by the rules
-    // of the filesystem, one UTF-16 unit at a time: unlike str::to_uppercase,
-    // it keeps unpaired surrogates and does not turn ß into SS, which is a
-    // different name.
-    let source: Vec<u16> = name.encode_wide().collect();
-    let length = i32::try_from(source.len())
-        .map_err(|_| Cause::Message(io::ErrorKind::InvalidInput, "file name is too long"))?;
-    let locale = [0_u16]; // LOCALE_NAME_INVARIANT
-    // SAFETY: `locale` ends with a null character, `source` has the length
-    // passed with it, and with a null output of size 0 the call only returns
-    // the size it needs.
-    let required = unsafe {
-        LCMapStringEx(
-            locale.as_ptr(),
-            LCMAP_UPPERCASE,
-            source.as_ptr(),
-            length,
-            ptr::null_mut(),
-            0,
-            ptr::null(),
-            ptr::null(),
-            0,
-        )
-    };
-    if required == 0 {
         return Err(io::Error::last_os_error().into());
     }
-    let mut mapped = vec![0_u16; required as usize];
-    // SAFETY: as above, and `mapped` has room for the `required` units passed
-    // with it.
-    let written = unsafe {
-        LCMapStringEx(
-            locale.as_ptr(),
-            LCMAP_UPPERCASE,
-            source.as_ptr(),
-            length,
-            mapped.as_mut_ptr(),
-            required,
-            ptr::null(),
-            ptr::null(),
-            0,
-        )
-    };
-    if written == 0 {
-        return Err(io::Error::last_os_error().into());
-    }
-    mapped.truncate(written as usize);
-    Ok(parent.join(std::ffi::OsString::from_wide(&mapped)))
+    Ok(())
 }
 
 /// The owner, group, and DACL of a file.

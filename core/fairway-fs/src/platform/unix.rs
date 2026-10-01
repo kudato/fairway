@@ -1,5 +1,4 @@
-//! The Unix steps: copying metadata, and on macOS, resolving directory names
-//! and computing lock keys.
+//! The Unix steps for copying filesystem metadata.
 //!
 //! Metadata is copied between open descriptors rather than paths, so that it
 //! cannot reach another file that has taken one of the paths in the meantime.
@@ -24,65 +23,6 @@ use std::{
     fs::FileTimes,
     os::macos::fs::{FileTimesExt, MetadataExt as _},
 };
-
-/// Implements [`super::canonical_parent`]: after resolving the symbolic links,
-/// asks the kernel for the directory's path, which has the letter case stored
-/// by the filesystem.
-#[cfg(target_os = "macos")]
-pub(super) fn canonical_parent(path: &std::path::Path) -> Result<std::path::PathBuf> {
-    use std::{
-        ffi::CStr,
-        os::unix::{ffi::OsStrExt, fs::OpenOptionsExt},
-    };
-    let path = std::fs::canonicalize(path)?;
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_EVTONLY)
-        .open(&path)?;
-    let mut bytes = [0_u8; libc::PATH_MAX as usize];
-    // SAFETY: F_GETPATH writes at most PATH_MAX bytes, the size of `bytes`, and
-    // `file` keeps the descriptor open during the call.
-    if unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETPATH, bytes.as_mut_ptr()) } == -1 {
-        return Err(io::Error::last_os_error().into());
-    }
-    let name = CStr::from_bytes_until_nul(&bytes)
-        .map_err(|source| Cause::External(io::ErrorKind::Other, Box::new(source)))?;
-    Ok(std::path::PathBuf::from(std::ffi::OsStr::from_bytes(
-        name.to_bytes(),
-    )))
-}
-
-/// Implements [`super::lock_key`]: the name is converted to Unicode
-/// normalization form D, and to upper case first if the directory's
-/// filesystem ignores case. A name that is not valid UTF-8 is kept as it is.
-#[cfg(target_os = "macos")]
-pub(super) fn lock_key(path: &std::path::Path) -> Result<std::path::PathBuf> {
-    use std::os::unix::fs::OpenOptionsExt;
-    use unicode_normalization::UnicodeNormalization;
-    let parent = path.parent().expect("normalized target");
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_EVTONLY)
-        .open(parent)?;
-    // SAFETY: fpathconf takes no pointers, and `file` keeps the descriptor open
-    // during the call.
-    let sensitive = unsafe { libc::fpathconf(file.as_raw_fd(), libc::_PC_CASE_SENSITIVE) };
-    if sensitive == -1 {
-        return Err(io::Error::last_os_error().into());
-    }
-    let name = path.file_name().expect("normalized target");
-    match name.to_str() {
-        Some(name) => {
-            let name: String = if sensitive == 0 {
-                name.to_uppercase().nfd().collect()
-            } else {
-                name.nfd().collect()
-            };
-            Ok(parent.join(name))
-        }
-        None => Ok(path.to_owned()),
-    }
-}
 
 /// Gives `target` the owner, group, permissions, and extended attributes of
 /// `source`; on Linux, the attributes include the POSIX ACL. On macOS, also

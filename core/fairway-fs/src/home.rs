@@ -40,15 +40,7 @@ fn resolve() -> Result<PathBuf, Error> {
 
 /// Implements [`crate::__private::initialize`].
 pub(crate) fn initialize() -> Result<(), Error> {
-    let locks = resolved()?.join("locks");
-    if locks
-        .try_exists()
-        .map_err(|source| Error::io(Operation::Metadata, Some(&locks), source))?
-    {
-        super::lock::clean_stale(&locks)
-            .map_err(|cause| Error::new(Operation::Lock, Some(&locks), cause))?;
-    }
-    Ok(())
+    resolved().map(|_| ())
 }
 
 /// Returns the path of the Fairway directory.
@@ -61,8 +53,7 @@ pub(crate) fn initialize() -> Result<(), Error> {
 ///
 /// The path is determined once per process and does not change afterwards,
 /// even if the environment does. The directory itself is not created and may
-/// not exist yet; [`write`](crate::write) and [`edit`](crate::edit) create
-/// its `locks` subdirectory for their [locks](crate#locking).
+/// not exist yet.
 ///
 /// # Errors
 ///

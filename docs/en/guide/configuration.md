@@ -36,25 +36,13 @@ The directory itself is not created at startup. Example contents:
 ```text
 ~/.fairway/
 ├── config.toml
-├── conf.d/
-│   ├── 10-server.toml
-│   └── 90-local/
-│       └── harness.toml
-└── locks/
+└── conf.d/
+    ├── 10-server.toml
+    └── 90-local/
+        └── harness.toml
 ```
 
-- `config.toml` and `conf.d` are the
-  [configuration files](#configuration-files).
-- `locks` is an internal directory that Fairway creates when modifying
-  files. It contains lock files: before writing, Fairway uses them to keep
-  multiple running instances from writing to the same file at the same
-  time. At startup, Fairway removes unused locks left after a crash.
-  You do not need to change the contents of `locks` by hand.
-
-For example, `fairway` can run in two terminals or scripts at the same
-time. If both runs modify the same files, they need a shared `locks`
-directory. By default, this is `~/.fairway/locks`. If you set
-`FAIRWAY_HOME`, use the same absolute path for both runs.
+`config.toml` and `conf.d` are the [configuration files](#configuration-files).
 
 ## Configuration files
 

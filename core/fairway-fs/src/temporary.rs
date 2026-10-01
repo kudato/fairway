@@ -1,7 +1,4 @@
-use std::{
-    io,
-    path::{Path, PathBuf},
-};
+use std::path::Path;
 
 use crate::{Error, Operation};
 
@@ -117,7 +114,7 @@ impl TempFile {
     /// # Errors
     ///
     /// Returns an error if the file cannot be deleted, for example
-    /// [`NotFound`](io::ErrorKind::NotFound) if it has already been removed.
+    /// [`NotFound`](std::io::ErrorKind::NotFound) if it has already been removed.
     /// On Windows, a file that is still open may fail to be deleted, so close
     /// the handles to it first, including those of child processes.
     pub async fn close(mut self) -> Result<(), Error> {
@@ -186,40 +183,4 @@ impl Drop for TempDir {
             super::defer(move || drop(directory));
         }
     }
-}
-
-/// Creates the temporary file for replacing `target`, in the same directory so
-/// that it can be renamed over the target.
-///
-/// The name starts with `.fairway-`. On Unix, the mode is `0o666`, reduced by
-/// the umask, if `new_file` is set, so that a new target gets the permissions
-/// of a file created with [`File::create`](std::fs::File::create). Otherwise it
-/// is `0o600`, so that the new contents stay private until the permissions of
-/// the file being replaced are copied.
-///
-/// The handle and the path are returned separately because dropping a
-/// [`NamedTempFile`](tempfile::NamedTempFile) deletes the file on the spot;
-/// the transaction closes the handle and deletes the path on a blocking
-/// thread, before it releases the lock.
-pub(crate) fn adjacent(
-    target: &Path,
-    new_file: bool,
-) -> io::Result<(std::fs::File, tempfile::TempPath)> {
-    let mut builder = tempfile::Builder::new();
-    builder.prefix(".fairway-");
-    let directory: PathBuf = target.parent().expect("absolute target with parent").into();
-    Ok(builder
-        .make_in(directory, |path| {
-            let mut options = std::fs::OpenOptions::new();
-            options.read(true).write(true).create_new(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(if new_file { 0o666 } else { 0o600 });
-            }
-            #[cfg(not(unix))]
-            let _ = new_file;
-            options.open(path)
-        })?
-        .into_parts())
 }

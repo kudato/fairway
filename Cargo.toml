@@ -48,6 +48,7 @@ libc = "0.2"
 xattr = "1"
 windows-sys = "0.61"
 unicode-normalization = "0.1"
+caseless = "0.2.2"
 
 # Tests and documentation examples.
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }

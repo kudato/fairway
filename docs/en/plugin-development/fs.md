@@ -196,8 +196,7 @@ where Fairway is started. For example, `.fairway` selects
 `/work/project/.fairway` when started from `/work/project`. The path determined
 at startup stays the same until the process exits.
 
-`home()` does not create the directory. `write` and `edit` create its
-`locks` subdirectory for their locks.
+`home()` does not create the directory.
 
 If the Fairway directory cannot be determined, for example because
 `FAIRWAY_HOME` is empty, Fairway reports it at startup and does not call the
@@ -268,10 +267,10 @@ the `fs::Error` has already become an `anyhow::Error`, get it back with
 ### How a file is saved
 
 `write` and `edit` never change a file in place. The new contents are written
-to a temporary `.fairway-…` file in the same directory, which then takes the
+to a temporary `.<file name>.lock` file in the same directory, which then takes the
 place of the old file in a single operation. So `read` and other programs see
 either the complete old contents or the complete new contents. On error, the
-temporary file is removed, and the old file is left untouched.
+old file is left untouched, and Fairway attempts to remove its temporary file.
 
 - `write` creates the file if it does not exist, but the parent directory must
   exist: create it with `mkdir`.
@@ -295,8 +294,9 @@ temporary file is removed, and the old file is left untouched.
 - Fairway does not wait for the data to reach the disk (`fsync`). The
   replacement is atomic, but after a power failure or an operating system
   crash, the new contents may be lost. If the process terminates in the middle
-  of a replacement, a temporary `.fairway-…` file may remain next to the file;
-  it can be deleted.
+  of a replacement, `.<file name>.lock` may remain next to the file and block
+  further changes. After checking that no operation is using it, remove it
+  manually.
 
 ### Concurrent access
 
@@ -306,44 +306,25 @@ operations never replace the same file at once, and changes made through
 
 - `read` does not use the lock and does not wait for writes: thanks to the
   atomic replacement, it always sees one whole version of the file.
-- `write` does not wait: if the file is already being changed, it returns
-  `WouldBlock` immediately. To wait for your turn, use `edit`.
-- `edit` waits for its turn without a time limit. Limit the wait with
-  `tokio::time::timeout`. Within a process, waiting `edit` calls for one file
-  proceed in the order in which they started waiting; between processes, the
-  order is not guaranteed.
-- When `write` or `edit` returns, successfully or with an error, the lock has
-  already been released. The exceptions are cancellation and panics: then the
-  lock is released once the remaining work has finished.
-- Only Fairway operations respect the lock: other programs can change the
-  file at any time. Fairway processes share locks only if they use the same
-  [Fairway directory](#fairway-directory).
-- Different spellings of one path share a lock. Symbolic links in the parent
-  directories are resolved, and on macOS and Windows, paths that the file
-  system treats as the same, such as paths that differ only in letter case,
-  are locked together too. Hard links to one file are locked independently.
-
-### Cancellation
-
-An operation is cancelled when its future is dropped before it completes: for
-example, when another branch of `tokio::select!`, such as
-`shutdown.requested()`, completes first, or when `tokio::time::timeout`
-expires.
-
-- A cancelled `read` changes nothing.
-- An `edit` cancelled before the handler has returned a value leaves the file
-  unchanged. This covers waiting for the lock, reading and decoding the file,
-  and running the handler itself.
-- Once `write` has acquired the lock, and once the `edit` handler has returned
-  a value, they ignore cancellation: encoding and replacement run to
-  completion on the thread for blocking operations. The file ends up either
-  unchanged, if something fails, or with the complete new contents. The
-  result of the operation, including any error, is lost.
-- Until this work has finished, the path stays locked: a `write` right after
-  the cancellation may return `WouldBlock`, and an `edit` waits.
-- Returning from the command handler does not interrupt this work: Fairway
-  waits for it before the process exits (after a shutdown signal, for
-  at most [15 seconds](cli.md)).
+- `write` does not wait: if the queue or the lock file name is occupied, it
+  returns `WouldBlock`.
+- `edit` waits without a time limit. Within a process, a queue is selected by
+  the full path after `canonicalize`, Unicode normalization, and case folding.
+  Waiting calls in one queue proceed in order; different queues can run
+  concurrently.
+- There is no shared waiting order between processes. If different queues
+  address one file, the lock file prevents concurrent changes.
+- For `report.txt`, the lock is the adjacent `.report.txt.lock`. Fairway creates
+  it before reading and uses it to hold the new contents. Processes coordinate
+  writes independently of their [Fairway directory](#fairway-directory).
+  Other programs can change the target at any time.
+- The name `.<file name>.lock` is reserved for Fairway. An existing file at
+  that name is not overwritten. The prefix and suffix must fit the filesystem's
+  name length limit. Reservations left after a crash are not removed at startup.
+- After `write` or `edit` returns successfully, the lock is released. On error,
+  Fairway attempts to remove its lock file before returning. After cancellation
+  or a panic, cleanup runs in the background and holds the queue until the
+  remaining work has finished.
 
 ### Panics
 

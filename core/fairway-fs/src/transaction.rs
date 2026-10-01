@@ -1,7 +1,7 @@
 //! Atomic replacement of a file through a temporary file in its directory.
 //!
 //! [`prepare`] resolves and locks the target, [`open`] opens the file being
-//! replaced and creates the temporary file, and [`Transaction::commit`] writes
+//! replaced and takes the reserved output file, and [`Transaction::commit`] writes
 //! the encoded contents to the temporary file, copies the metadata, and
 //! renames it over the target. Whatever the outcome, the temporary file is
 //! then removed, and the lock is released last.
@@ -26,8 +26,6 @@ pub(crate) struct Transaction {
     output: Option<File>,
     /// The file being replaced, or `None` if the target does not exist yet.
     original: Option<File>,
-    /// The path of the temporary file; dropping it deletes the file.
-    temp: Option<tempfile::TempPath>,
     target: PathBuf,
     lock: Option<FileLock>,
     /// Lets a test pause `commit` on the blocking thread: `commit` reports
@@ -48,7 +46,7 @@ pub(crate) async fn prepare(path: &Path, editing: bool) -> Result<(PathBuf, File
 }
 
 /// Starts the replacement of `target`, whose `lock` is held: opens the file
-/// being replaced and creates the temporary file. Runs on a blocking thread.
+/// being replaced and takes the reserved output file. Runs on a blocking thread.
 ///
 /// When `editing`, the target must exist, and a second handle to it is
 /// returned for reading the current contents. Both the target and the
@@ -57,7 +55,7 @@ pub(crate) async fn prepare(path: &Path, editing: bool) -> Result<(PathBuf, File
 /// lock is released before returning.
 pub(crate) fn open(
     target: PathBuf,
-    lock: FileLock,
+    mut lock: FileLock,
     editing: bool,
 ) -> Result<(Transaction, Option<File>), Error> {
     let setup = (|| {
@@ -71,11 +69,12 @@ pub(crate) fn open(
         } else {
             None
         };
-        let (file, temp) = super::temporary::adjacent(&target, original.is_none())
+        let file = lock.take_file();
+        super::platform::prepare_output(&file, original.is_some())
             .map_err(|source| Error::io(Operation::CreateTemporaryFile, Some(&target), source))?;
-        Ok::<_, Error>((original, source, file, temp))
+        Ok::<_, Error>((original, source, file))
     })();
-    let (original, source, file, temp) = match setup {
+    let (original, source, file) = match setup {
         Ok(parts) => parts,
         Err(error) => {
             lock.release();
@@ -86,7 +85,6 @@ pub(crate) fn open(
         Transaction {
             output: Some(file),
             original,
-            temp: Some(temp),
             target,
             lock: Some(lock),
             #[cfg(test)]
@@ -129,14 +127,22 @@ impl Transaction {
             )
             .map_err(|cause| Error::new(Operation::CopyMetadata, Some(&self.target), cause))?;
         }
+        #[cfg(windows)]
+        if self.original.is_none() {
+            super::platform::finish_new_file(self.output.as_ref().expect("open transaction"))
+                .map_err(|cause| Error::new(Operation::CopyMetadata, Some(&self.target), cause))?;
+        }
         // Check the target again right before the rename: since it was opened,
         // another program may have replaced it with a symbolic link, and the
         // rename would replace the link instead of the file.
         super::platform::check_target(&self.target, false)?;
         drop(self.original.take());
         drop(self.output.take());
-        std::fs::rename(self.temp.as_ref().expect("temporary path"), &self.target)
-            .map_err(|source| Error::io(Operation::Replace, Some(&self.target), source))
+        let lock = self.lock.as_mut().expect("held lock");
+        std::fs::rename(lock.path(), &self.target)
+            .map_err(|source| Error::io(Operation::Replace, Some(&self.target), source))?;
+        lock.published();
+        Ok(())
     }
 
     /// Closes the files, deletes the temporary file if it is still there, and
@@ -144,7 +150,6 @@ impl Transaction {
     fn discard(&mut self) {
         drop(self.output.take());
         drop(self.original.take());
-        drop(self.temp.take());
         if let Some(lock) = self.lock.take() {
             lock.release();
         }
@@ -161,9 +166,8 @@ impl Drop for Transaction {
     fn drop(&mut self) {
         let output = self.output.take();
         let original = self.original.take();
-        let temp = self.temp.take();
         let lock = self.lock.take();
-        if output.is_none() && original.is_none() && temp.is_none() && lock.is_none() {
+        if output.is_none() && original.is_none() && lock.is_none() {
             return;
         }
         // Closing the files and deleting the temporary file block, so they run
@@ -172,7 +176,6 @@ impl Drop for Transaction {
         super::defer(move || {
             drop(output);
             drop(original);
-            drop(temp);
             if let Some(lock) = lock {
                 lock.release();
             }
@@ -202,7 +205,7 @@ mod tests {
         std::fs::write(&path, "old")?;
         let mut output = open_transaction(&path, false).await?;
         // A handle opened only for reading makes writing the new contents fail.
-        let readonly = File::open(output.temp.as_ref().unwrap())?;
+        let readonly = File::open(output.lock.as_ref().unwrap().path())?;
         output.output = Some(readonly);
         let error = blocking(Operation::Write, Some(path.clone()), move || {
             output.commit(b"cannot write this".to_vec())
@@ -220,6 +223,33 @@ mod tests {
         })
         .await?;
         assert_eq!(std::fs::read_to_string(path)?, "following");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn published_transaction_does_not_remove_the_next_reservation() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("data");
+        std::fs::write(&path, "old")?;
+        let mut output = open_transaction(&path, false).await?;
+        let reservation = output.lock.as_ref().unwrap().path().to_owned();
+        blocking(Operation::Write, Some(path.clone()), move || {
+            output.publish(b"new")?;
+            // Another process can reserve this name as soon as rename returns.
+            let mut next = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&reservation)
+                .unwrap();
+            next.write_all(b"next operation").unwrap();
+            output.abort();
+            assert_eq!(std::fs::read(&reservation).unwrap(), b"next operation");
+            drop(next);
+            std::fs::remove_file(reservation).unwrap();
+            Ok(())
+        })
+        .await?;
+        assert_eq!(std::fs::read(path)?, b"new");
         Ok(())
     }
 
@@ -267,7 +297,7 @@ mod tests {
         let path = std::fs::canonicalize(directory.path())?.join("new");
         let output = open_transaction(&path, false).await?;
         // Without the temporary file, the rename fails.
-        std::fs::remove_file(output.temp.as_ref().unwrap())?;
+        std::fs::remove_file(output.lock.as_ref().unwrap().path())?;
         let error = blocking(Operation::Write, Some(path.clone()), move || {
             output.commit(b"new".to_vec())
         })
