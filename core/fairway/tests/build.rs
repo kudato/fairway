@@ -316,6 +316,35 @@ fw::command!(CLI, "Wrong worker count", run, workers = |args: &Args| args.worker
         rejected(fixture.build(false), diagnostic);
     }
 
+    for name in [
+        r"two\u{a0}words",
+        r"two\u{3000}words",
+        r"two\u{85}words",
+        r"two\u{9f}words",
+    ] {
+        let namespace = format!(r#"fw::namespace!(CLI, "{name}", "Invalid namespace");"#);
+        let command = format!(
+            r#"
+fw::namespace!(CLI, "sample", "Sample");
+async fn run(_: fw::Shutdown) -> anyhow::Result<()> {{ Ok(()) }}
+fw::command!(CLI, "{name}", "Invalid subcommand", run);
+"#
+        );
+        for (source, declaration) in [(namespace, "fw::namespace!"), (command, "fw::command!")] {
+            fixture.write("plugin-b/src/lib.rs", &source);
+            for release in [false, true] {
+                let output = fixture.build(release);
+                let error = String::from_utf8_lossy(&output.stderr).replace('\\', "/");
+                rejected(
+                    output,
+                    "a CLI name cannot contain whitespace or control characters",
+                );
+                assert!(error.contains("plugin-b/src/lib.rs:"), "{name}: {error}");
+                assert!(error.contains(declaration), "{name}: {error}");
+            }
+        }
+    }
+
     // Check the name's value, including raw and escaped string literals,
     // and point to the declaration in both build profiles.
     let cases = [
@@ -387,6 +416,7 @@ fw::command!(CLI, "run", "Bad options", run);
 fw::namespace!(CLI, "sample", "Sample");
 fw::namespace!(OTHER, "another", "Another namespace");
 fw::namespace!(HELPERS, "help-tools", "help");
+fw::namespace!(UNICODE, "café", "Unicode namespace");
 #[derive(clap::Args)]
 struct Args { #[arg(long)] workers: usize }
 async fn run(_: Args, _: fw::Shutdown) -> anyhow::Result<()> { panic!("handler must not run in validation") }
@@ -395,10 +425,12 @@ fw::command!(CLI, "run", "Run", run, workers = |_: &Args| -> usize {
 });
 fw::command!(OTHER, "run", "Same command name in another namespace", run);
 fw::command!(HELPERS, "helpful", "help", run);
+fw::command!(UNICODE, "данные-猫-🌍", "Unicode subcommand", run);
 "#,
     );
     successful(fixture.build(false));
     successful(fixture.check(false));
+    successful(fixture.run(&["café", "данные-猫-🌍", "--help"]));
 
     fixture.write("plugin-a/src/lib.rs", a);
     fixture.write("plugin-b/src/lib.rs", b);

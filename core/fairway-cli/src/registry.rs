@@ -34,11 +34,26 @@ const fn valid_name(name: &str) {
     );
     let mut i = 0;
     while i < bytes.len() {
+        // Decode one scalar in const evaluation; str::chars is not const.
+        // The input is &str, so every sequence is already valid UTF-8.
+        let first = bytes[i];
+        let (mut scalar, width) = match first {
+            0..=0x7f => (first as u32, 1),
+            0xc0..=0xdf => ((first & 0x1f) as u32, 2),
+            0xe0..=0xef => ((first & 0x0f) as u32, 3),
+            _ => ((first & 0x07) as u32, 4),
+        };
+        let mut offset = 1;
+        while offset < width {
+            scalar = (scalar << 6) | (bytes[i + offset] & 0x3f) as u32;
+            offset += 1;
+        }
+        let character = char::from_u32(scalar).expect("a str contains valid Unicode scalars");
         assert!(
-            bytes[i] > 32 && bytes[i] != 127,
+            !character.is_whitespace() && !character.is_control(),
             "a CLI name cannot contain whitespace or control characters"
         );
-        i += 1;
+        i += width;
     }
 }
 
