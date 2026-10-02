@@ -352,6 +352,7 @@ async fn unknown_top_level_names_are_errors_in_each_file() {
     for relative in ["config.toml", "conf.d/nested/settings.toml"] {
         for namespaces in [vec![], vec![&TABLE_REGISTRATION]] {
             let home = TempDir::new().unwrap();
+            let path: PathBuf = home.path().join(relative).components().collect();
             write(home.path(), relative, "");
             load(home.path(), namespaces.clone()).await.unwrap();
             for text in [
@@ -367,7 +368,7 @@ async fn unknown_top_level_names_are_errors_in_each_file() {
                     error.to_string(),
                     format!(
                         "{}: unknown configuration namespace \"setings\"",
-                        home.path().join(relative).display(),
+                        path.display(),
                     ),
                     "{text}",
                 );
