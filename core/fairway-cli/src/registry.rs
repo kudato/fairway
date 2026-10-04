@@ -122,6 +122,12 @@ pub(crate) fn assert_valid() {
             .iter()
             .filter(|command| std::ptr::eq(command.namespace, namespace))
             .collect();
+        assert!(
+            !commands.is_empty(),
+            "namespace {:?} has no commands:\n  {}",
+            namespace.name,
+            namespace.source,
+        );
         commands.sort_unstable_by_key(|command| (command.name, command.source));
         for pair in commands.windows(2) {
             let (first, second) = (pair[0], pair[1]);

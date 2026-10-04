@@ -3,7 +3,8 @@
 /// Declares `pub(crate) static NAME: Namespace` for `fairway <name>`.
 ///
 /// Namespace names must be unique across the linked application.
-/// The application's registry test checks this.
+/// Each namespace must have its own handler or at least one subcommand.
+/// The application's registry test checks these requirements.
 /// The name `help` is reserved for built-in help and is a compile error.
 ///
 /// ```

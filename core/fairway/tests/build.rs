@@ -189,8 +189,16 @@ fn rejected(output: Output, diagnostic: &str) {
 #[test]
 fn plugins_register_and_application_tests_reject_conflicts() {
     let fixture = Fixture::new();
-    let a = "#![deny(warnings)]\nfw::namespace!(CLI, \"shared\", \"First plugin\");\n";
-    let b = "#![deny(warnings)]\nfw::namespace!(CLI, \"second\", \"Second plugin\");\n";
+    let a = r#"#![deny(warnings)]
+fw::namespace!(CLI, "shared", "First plugin");
+async fn run(_: fw::Shutdown) -> anyhow::Result<()> { panic!("validation must not run handlers") }
+fw::command!(CLI, "First plugin", run);
+"#;
+    let b = r#"#![deny(warnings)]
+fw::namespace!(CLI, "second", "Second plugin");
+async fn run(_: fw::Shutdown) -> anyhow::Result<()> { panic!("validation must not run handlers") }
+fw::command!(CLI, "run", "Run", run);
+"#;
     fixture.write("plugin-a/src/lib.rs", a);
     fixture.write("plugin-b/src/lib.rs", b);
     successful(fixture.build(false));
@@ -200,6 +208,21 @@ fn plugins_register_and_application_tests_reject_conflicts() {
     assert!(help.contains("First plugin"), "{help}");
     assert!(help.contains("Second plugin"), "{help}");
     successful(fixture.check(false));
+
+    fixture.write(
+        "plugin-b/src/lib.rs",
+        "#![deny(warnings)]\nfw::namespace!(CLI, \"empty\", \"Empty namespace\");\n",
+    );
+    for release in [false, true] {
+        successful(fixture.build(release));
+        let output = fixture.check(release);
+        let diagnostic = String::from_utf8_lossy(&output.stdout).replace('\\', "/");
+        rejected(output, "namespace \"empty\" has no commands");
+        assert!(
+            diagnostic.contains("plugin_b (plugin-b/src/lib.rs:2)"),
+            "{diagnostic}"
+        );
+    }
 
     // Type and handler-mode errors remain compile errors.
     let cases = [

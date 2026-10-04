@@ -33,8 +33,9 @@ impl Cli {
     ///
     /// # Panics
     ///
-    /// Panics on duplicate names or incompatible registrations, and on
-    /// invalid clap argument definitions when debug assertions are enabled.
+    /// Panics on namespaces without commands, duplicate names, or incompatible
+    /// registrations, and on invalid clap argument definitions when debug
+    /// assertions are enabled.
     /// Registration conflicts include both declaration locations.
     pub fn assert_valid(self) {
         crate::registry::assert_valid();

@@ -165,7 +165,8 @@ $ fairway http serve --listen 127.0.0.1:9000 --workers 4
 
 Namespace names are unique across the application; command names are unique within a namespace.
 A namespace registers either subcommands or a handler for the namespace itself.
-The application test checks for duplicate names: `cargo test -p fairway`.
+The application test checks for namespaces without commands and duplicate
+names: `cargo test -p fairway`.
 The check covers the plugins and Cargo features included in that build;
 `cargo build` does not run it. Mixing the two kinds of commands or registering
 a second handler for the namespace itself causes a compilation error.
