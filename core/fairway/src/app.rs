@@ -18,10 +18,7 @@ pub(crate) fn run(
 ) -> ExitCode {
     let command = match cli.parse(args) {
         Ok(command) => command,
-        Err(error) => {
-            let _ = error.print();
-            return ExitCode::from(u8::try_from(error.exit_code()).unwrap_or(2));
-        }
+        Err(error) => return report_clap_error(&error),
     };
 
     let result = (|| {
@@ -47,11 +44,19 @@ pub(crate) fn run(
 
     match result {
         Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            let _ = writeln!(std::io::stderr(), "error: {error:#}");
-            ExitCode::FAILURE
-        }
+        Err(error) => match error.downcast_ref::<clap::Error>() {
+            Some(error) => report_clap_error(error),
+            None => {
+                let _ = writeln!(std::io::stderr(), "error: {error:#}");
+                ExitCode::FAILURE
+            }
+        },
     }
+}
+
+fn report_clap_error(error: &clap::Error) -> ExitCode {
+    let _ = error.print();
+    ExitCode::from(u8::try_from(error.exit_code()).unwrap_or(2))
 }
 
 fn build_runtime(threading: Threading) -> std::io::Result<tokio::runtime::Runtime> {

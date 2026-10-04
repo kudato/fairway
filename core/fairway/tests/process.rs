@@ -49,6 +49,47 @@ fairway_cli::command!(
     long_about = "Loaded settings"
 );
 
+#[derive(clap::Args)]
+struct Range {
+    #[arg(long)]
+    from: u64,
+    #[arg(long)]
+    to: u64,
+}
+
+async fn range(args: Range, _: Shutdown) -> anyhow::Result<()> {
+    if args.from > args.to {
+        return Err(clap::Error::raw(
+            clap::error::ErrorKind::ValueValidation,
+            "--from must not exceed --to",
+        )
+        .into());
+    }
+    Ok(())
+}
+fairway_cli::command!(
+    CLI,
+    "range",
+    "Validate a range",
+    range,
+    long_about = "Validate a range"
+);
+
+async fn range_with_context(args: Range, shutdown: Shutdown) -> anyhow::Result<()> {
+    use anyhow::Context;
+
+    range(args, shutdown)
+        .await
+        .context("could not select range")
+}
+fairway_cli::command!(
+    CLI,
+    "range-context",
+    "Validate a range with context",
+    range_with_context,
+    long_about = "Validate a range with context"
+);
+
 async fn flavor(_: Shutdown) -> anyhow::Result<()> {
     let caller = std::rc::Rc::new(std::thread::current().id());
     let task = tokio::spawn(async {
@@ -312,6 +353,19 @@ fn help_and_usage_errors_use_the_correct_stream_and_exit_code() {
             assert!(stderr.contains("--unknown"), "{stderr}");
             assert!(!stdout.contains("Usage:"), "{stdout}");
         }
+    }
+}
+
+#[test]
+fn handler_argument_errors_preserve_clap_output_and_exit_code() {
+    let home = tempfile::tempdir().unwrap();
+    for argument in ["range --from 5 --to 1", "range-context --from 5 --to 1"] {
+        let output = child(argument, home.path()).output().unwrap();
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(stderr.trim(), "error: --from must not exceed --to");
+        assert!(!stdout.contains("--from"), "{stdout}");
     }
 }
 

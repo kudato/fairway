@@ -23,6 +23,10 @@
 //! is set, so its future need not implement `Send`. Futures passed to
 //! `tokio::spawn` must still implement `Send`.
 //!
+//! For a returned [`clap::Error`], Fairway uses clap's output and exit code.
+//! Fairway prints other errors to stderr with their context chain and exits
+//! with code 1.
+//!
 //! Fairway owns the runtime, signal handling, and process lifecycle.
 //! Plugins use [`namespace!`], [`command!`], and [`Shutdown`].
 

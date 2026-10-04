@@ -283,9 +283,27 @@ the handler does not use `Shutdown` or blocks execution.
 
 ### Errors
 
-Return errors through `Result`: Fairway prints them to stderr and sets
+Return errors through `Result`: Fairway prints them and sets
 the exit code. The handler must not print the error again or call `exit`.
 
+To report an argument error from a handler, return a `clap::Error`
+using `.into()`. Fairway uses clap's output and exit code; argument
+validation errors exit with code 2. For example, call
+`validate_range(args.from, args.to)?`:
+
+```rust
+fn validate_range(from: u64, to: u64) -> anyhow::Result<()> {
+    if from > to {
+        return Err(clap::Error::raw(
+            clap::error::ErrorKind::ValueValidation,
+            "--from must not exceed --to",
+        )
+        .into());
+    }
+    Ok(())
+}
+```
+
 - `0` — `Ok(())`, help, or version.
-- `1` — a command or preparation error, or an exceeded shutdown deadline.
+- `1` — an ordinary command error, a preparation error, or an exceeded shutdown deadline.
 - `2` — a CLI argument error.
