@@ -6,10 +6,10 @@
 
 `Namespace` объединяет команды под общим именем в CLI: `fairway <namespace>`.
 
-`namespace!(CLI, "name", "about")` объявляет пространство: `CLI` — имя объекта
-в Rust-коде, `"name"` — имя в CLI, `"about"` — описание для справки.
+`namespace!(CLI, "name")` объявляет пространство: `CLI` — имя объекта
+в Rust-коде, `"name"` — имя в CLI.
 
-`command!(CLI, "about", handler)` связывает вызов `fairway <namespace>`
+`command!(CLI, "about", handler, long_about = "details")` связывает вызов `fairway <namespace>`
 с обработчиком.
 
 ```rust
@@ -17,7 +17,7 @@
 
 use fairway_cli::Shutdown;
 
-fairway_cli::namespace!(CLI, "hello", "Print a greeting");
+fairway_cli::namespace!(CLI, "hello");
 
 async fn hello(shutdown: Shutdown) -> anyhow::Result<()> {
     if shutdown.is_requested() {
@@ -27,7 +27,12 @@ async fn hello(shutdown: Shutdown) -> anyhow::Result<()> {
     Ok(())
 }
 
-fairway_cli::command!(CLI, "Print a greeting", hello);
+fairway_cli::command!(
+    CLI,
+    "Print a greeting",
+    hello,
+    long_about = "Write Hello, world! to standard output.",
+);
 ```
 
 ```console
@@ -39,8 +44,10 @@ Hello, world!
 ## Аргументы и подкоманды
 
 Для подкоманды в `command!` добавляется её имя:
-`command!(CLI, "name", "about", handler)` регистрирует вызов
+`command!(CLI, "name", "about", handler, long_about = "details")` регистрирует вызов
 `fairway <namespace> <name>`.
+
+Для самого пространства зарегистрируйте `fairway_cli::help`, как в примере ниже.
 
 Аргументы CLI описываются типом с `clap::Args`;
 обработчик получает значение этого типа.
@@ -50,7 +57,13 @@ Hello, world!
 
 use fairway_cli::Shutdown;
 
-fairway_cli::namespace!(CLI, "text", "Text commands");
+fairway_cli::namespace!(CLI, "text");
+fairway_cli::command!(
+    CLI,
+    "Text commands",
+    fairway_cli::help,
+    long_about = "Convert text to uppercase or repeat it a chosen number of times.",
+);
 
 #[derive(clap::Args)]
 struct Upper {
@@ -86,8 +99,20 @@ async fn repeat(args: Repeat, shutdown: Shutdown) -> anyhow::Result<()> {
     Ok(())
 }
 
-fairway_cli::command!(CLI, "upper", "Convert text to uppercase", upper);
-fairway_cli::command!(CLI, "repeat", "Repeat text", repeat);
+fairway_cli::command!(
+    CLI,
+    "upper",
+    "Convert text to uppercase",
+    upper,
+    long_about = "Convert the supplied text to uppercase and print the result.",
+);
+fairway_cli::command!(
+    CLI,
+    "repeat",
+    "Repeat text",
+    repeat,
+    long_about = "Print the supplied text on separate lines. Use --times to choose how many times.",
+);
 ```
 
 ```console
@@ -122,7 +147,13 @@ use axum::{Router, routing::get};
 use fairway_cli::Shutdown;
 use tokio::net::TcpListener;
 
-fairway_cli::namespace!(CLI, "http", "HTTP server");
+fairway_cli::namespace!(CLI, "http");
+fairway_cli::command!(
+    CLI,
+    "HTTP server",
+    fairway_cli::help,
+    long_about = "Commands for running an HTTP server.",
+);
 
 #[derive(clap::Args)]
 struct Serve {
@@ -148,7 +179,14 @@ async fn serve(args: Serve, shutdown: Shutdown) -> anyhow::Result<()> {
     Ok(())
 }
 
-fairway_cli::command!(CLI, "serve", "Start the server", serve, workers = |args: &Serve| args.workers);
+fairway_cli::command!(
+    CLI,
+    "serve",
+    "Start the server",
+    serve,
+    long_about = "Serve the /health endpoint. Use --listen to choose the address.",
+    workers = |args: &Serve| args.workers,
+);
 ```
 
 ```console,ignore
@@ -159,18 +197,20 @@ $ fairway http serve --listen 127.0.0.1:9000 --workers 4
 
 ### Регистрация
 
-- `namespace!(CLI, "name", "about")` — объявляет
+- `namespace!(CLI, "name")` — объявляет
   `pub(crate) static CLI: Namespace` для `fairway name`.
-- `command!(CLI, "name", "about", handler)` — добавляет подкоманду.
-- `command!(CLI, "about", handler)` — задаёт обработчик для `fairway <namespace>`.
+- `command!(CLI, "name", "about", handler, long_about = "details")` — добавляет подкоманду.
+- `command!(CLI, "about", handler, long_about = "details")` — задаёт обработчик для `fairway <namespace>`.
 
 Имя пространства уникально в приложении, имя команды — внутри пространства.
-В пространстве регистрируются либо подкоманды, либо обработчик самого пространства.
+Для пространства регистрируется обычный обработчик или `fairway_cli::help`.
+Во втором случае можно добавлять подкоманды; вызов самого пространства
+выводит полную справку и завершается с кодом 0.
 Пространства без команд и повторы имён проверяет общий тест приложения:
 `cargo test -p fairway`.
 Проверка охватывает плагины и Cargo features, подключённые в этой сборке;
-`cargo build` сам её не запускает. Смешение двух видов команд и повторный
-обработчик самого пространства — ошибки компиляции.
+`cargo build` сам её не запускает. Совмещение обычного обработчика пространства
+с подкомандами и повторная регистрация действия пространства — ошибки компиляции.
 Имена непустые, без пробелов и управляющих символов.
 
 Имя `help` зарезервировано для встроенной справки. Пространство
@@ -181,8 +221,14 @@ $ fairway http serve --listen 127.0.0.1:9000 --workers 4
 `fairway-cli` автоматически формирует справку по `--help` для приложения,
 пространства команд и отдельной подкоманды.
 
-`about` задаёт описание в справке, doc-комментарии полей аргументов —
-описания параметров CLI.
+В каждом `command!` обязательны оба описания: `about` для списка команд
+и `-h`, `long_about` для `--help`. Doc-комментарии полей аргументов задают
+описания параметров CLI. Описания самой структуры аргументов не заменяют
+тексты из `command!`.
+
+`fairway_cli::help` выводит справку до загрузки настроек и создания runtime.
+Его можно импортировать через `use fairway_cli::help;` или под другим именем.
+Параметр `workers` для этого действия не допускается.
 
 ### Обработчики
 

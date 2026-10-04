@@ -57,12 +57,37 @@ impl PreparedCommand {
 pub struct ShutdownOnly;
 pub struct ArgumentsAndShutdown;
 
+/// The built-in action that displays a namespace's full help.
+///
+/// Register this value with [`command!`](crate::command) to describe a group
+/// of subcommands. Invoking the namespace displays help and exits successfully,
+/// before Fairway loads configuration or creates a runtime.
+///
+/// ```
+/// fairway_cli::namespace!(CLI, "text");
+/// fairway_cli::command!(CLI, "Text commands", fairway_cli::help,
+///     long_about = "Commands for working with text.");
+/// ```
+#[derive(Clone, Copy)]
+pub struct Help;
+
+pub enum Action {
+    Run(PreparedCommand),
+    Help,
+}
+
 pub trait Handler<Signature>: 'static {
     type Args: 'static;
+    const IS_HELP: bool = false;
 
     fn augment(command: clap::Command) -> clap::Command;
-    fn parse(matches: &mut ArgMatches) -> Result<Self::Args, clap::Error>;
-    fn start(self, args: Self::Args, shutdown: Shutdown) -> CommandFuture;
+    fn prepare<W, Selection>(
+        self,
+        matches: &mut ArgMatches,
+        workers: W,
+    ) -> Result<Action, clap::Error>
+    where
+        W: Workers<Self::Args, Selection>;
 }
 
 impl<F, Fut> Handler<ShutdownOnly> for F
@@ -76,12 +101,14 @@ where
         command
     }
 
-    fn parse(_: &mut ArgMatches) -> Result<(), clap::Error> {
-        Ok(())
-    }
-
-    fn start(self, (): (), shutdown: Shutdown) -> CommandFuture {
-        Box::pin(self(shutdown))
+    fn prepare<W, Selection>(self, _: &mut ArgMatches, workers: W) -> Result<Action, clap::Error>
+    where
+        W: Workers<(), Selection>,
+    {
+        Ok(Action::Run(PreparedCommand {
+            threading: workers.threading(&()),
+            start: Box::new(move |shutdown| Box::pin(self(shutdown))),
+        }))
     }
 }
 
@@ -97,13 +124,43 @@ where
         T::augment_args(command)
     }
 
-    fn parse(matches: &mut ArgMatches) -> Result<T, clap::Error> {
-        T::from_arg_matches_mut(matches)
+    fn prepare<W, Selection>(
+        self,
+        matches: &mut ArgMatches,
+        workers: W,
+    ) -> Result<Action, clap::Error>
+    where
+        W: Workers<T, Selection>,
+    {
+        let args = T::from_arg_matches_mut(matches)?;
+        Ok(Action::Run(PreparedCommand {
+            threading: workers.threading(&args),
+            start: Box::new(move |shutdown| Box::pin(self(args, shutdown))),
+        }))
+    }
+}
+
+impl Handler<Help> for Help {
+    type Args = ();
+    const IS_HELP: bool = true;
+
+    fn augment(command: clap::Command) -> clap::Command {
+        command
     }
 
-    fn start(self, args: T, shutdown: Shutdown) -> CommandFuture {
-        Box::pin(self(args, shutdown))
+    fn prepare<W, Selection>(self, _: &mut ArgMatches, _: W) -> Result<Action, clap::Error>
+    where
+        W: Workers<(), Selection>,
+    {
+        Ok(Action::Help)
     }
+}
+
+pub const fn is_help<F, Signature>(_: &F) -> bool
+where
+    F: Handler<Signature>,
+{
+    F::IS_HELP
 }
 
 pub struct Fixed;
@@ -144,15 +201,10 @@ pub fn prepare<F, Signature, W, Selection>(
     handler: F,
     matches: &mut ArgMatches,
     workers: W,
-) -> Result<PreparedCommand, clap::Error>
+) -> Result<Action, clap::Error>
 where
     F: Handler<Signature>,
     W: Workers<F::Args, Selection>,
 {
-    let args = F::parse(matches)?;
-    let threading = workers.threading(&args);
-    Ok(PreparedCommand {
-        threading,
-        start: Box::new(move |shutdown| handler.start(args, shutdown)),
-    })
+    handler.prepare(matches, workers)
 }

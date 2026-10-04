@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 
 use clap::ArgMatches;
 
-use crate::handler::PreparedCommand;
+use crate::handler::{Action, PreparedCommand};
 use crate::registry::{Command, FAIRWAY_CLI_COMMANDS, FAIRWAY_CLI_NAMESPACES, Namespace};
 
 /// The command-line parser used by the Fairway application.
@@ -57,10 +57,21 @@ impl Cli {
         args: impl IntoIterator<Item = OsString>,
     ) -> Result<PreparedCommand, clap::Error> {
         let groups = grouped();
-        let mut matches = tree(self.root, groups).try_get_matches_from(args)?;
+        let mut root = tree(self.root, groups);
+        let mut matches = root.try_get_matches_from_mut(args)?;
         let (command, mut matches) = selected(groups, &mut matches)
             .expect("clap requires a namespace and its handler or a subcommand");
-        (command.prepare)(&mut matches)
+        match (command.prepare)(&mut matches)? {
+            Action::Run(prepared) => Ok(prepared),
+            Action::Help => {
+                let namespace = root
+                    .find_subcommand_mut(command.namespace.name)
+                    .expect("the selected namespace is in the command tree");
+                Err(namespace
+                    .try_get_matches_from_mut([command.namespace.name, "--help"])
+                    .expect_err("--help returns clap's help diagnostic"))
+            }
+        }
     }
 }
 
@@ -114,23 +125,20 @@ fn tree(root: clap::Command, groups: &[Group<'_>]) -> clap::Command {
     for group in groups {
         let mut namespace = clap::Command::new(group.namespace.name);
         if let Some(own) = group.own {
-            namespace = (own.augment)(namespace).about(group.namespace.about);
-            if own.about != group.namespace.about {
-                namespace =
-                    namespace.long_about(format!("{}\n\n{}", group.namespace.about, own.about,));
-            } else {
-                namespace = namespace.long_about(None);
-            }
+            namespace = (own.augment)(namespace)
+                .about(own.about)
+                .long_about(own.long_about);
         } else {
             namespace = namespace
-                .about(group.namespace.about)
                 .subcommand_required(true)
                 .arg_required_else_help(true);
+        }
+        if group.own.is_none_or(|own| own.is_help) {
             for (name, command) in &group.named {
                 namespace = namespace.subcommand(
                     (command.augment)(clap::Command::new(*name))
                         .about(command.about)
-                        .long_about(None),
+                        .long_about(command.long_about),
                 );
             }
         }
@@ -147,7 +155,9 @@ fn selected<'a>(
     let group = &groups[groups
         .binary_search_by_key(&namespace.as_str(), |group| group.namespace.name)
         .ok()?];
-    if let Some(own) = group.own {
+    if let Some(own) = group.own
+        && (!own.is_help || below.subcommand_name().is_none())
+    {
         return Some((own, below));
     }
     let (name, arguments) = below.remove_subcommand()?;
@@ -162,15 +172,38 @@ fn selected<'a>(
 mod tests {
     use super::{grouped, tree};
 
-    crate::namespace!(TEXT, "text", "Text commands");
-    crate::namespace!(HELLO, "hello", "Greeting");
+    crate::namespace!(TEXT, "text");
+    crate::command!(
+        TEXT,
+        "Text commands",
+        crate::help,
+        long_about = "Text commands"
+    );
+    crate::namespace!(HELLO, "hello");
 
     async fn run(_: crate::Shutdown) -> anyhow::Result<()> {
         Ok(())
     }
-    crate::command!(TEXT, "upper", "Uppercase text", run);
-    crate::command!(TEXT, "repeat", "Repeat text", run);
-    crate::command!(HELLO, "Print a greeting", run);
+    crate::command!(
+        TEXT,
+        "upper",
+        "Uppercase text",
+        run,
+        long_about = "Uppercase text"
+    );
+    crate::command!(
+        TEXT,
+        "repeat",
+        "Repeat text",
+        run,
+        long_about = "Repeat text"
+    );
+    crate::command!(
+        HELLO,
+        "Print a greeting",
+        run,
+        long_about = "Print a greeting"
+    );
 
     #[test]
     fn namespaces_and_subcommands_are_sorted() {

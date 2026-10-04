@@ -6,10 +6,10 @@
 
 `Namespace` groups commands under a common CLI name: `fairway <namespace>`.
 
-`namespace!(CLI, "name", "about")` declares a namespace: `CLI` is the object name
-in Rust code, `"name"` is the CLI name, and `"about"` is the help description.
+`namespace!(CLI, "name")` declares a namespace: `CLI` is the object name
+in Rust code, `"name"` is the CLI name.
 
-`command!(CLI, "about", handler)` binds the `fairway <namespace>` invocation
+`command!(CLI, "about", handler, long_about = "details")` binds the `fairway <namespace>` invocation
 to a handler.
 
 ```rust
@@ -17,7 +17,7 @@ to a handler.
 
 use fairway_cli::Shutdown;
 
-fairway_cli::namespace!(CLI, "hello", "Print a greeting");
+fairway_cli::namespace!(CLI, "hello");
 
 async fn hello(shutdown: Shutdown) -> anyhow::Result<()> {
     if shutdown.is_requested() {
@@ -27,7 +27,12 @@ async fn hello(shutdown: Shutdown) -> anyhow::Result<()> {
     Ok(())
 }
 
-fairway_cli::command!(CLI, "Print a greeting", hello);
+fairway_cli::command!(
+    CLI,
+    "Print a greeting",
+    hello,
+    long_about = "Write Hello, world! to standard output.",
+);
 ```
 
 ```console
@@ -39,8 +44,10 @@ Hello, world!
 ## Arguments and subcommands
 
 To register a subcommand, add its name to `command!`:
-`command!(CLI, "name", "about", handler)` registers the invocation
+`command!(CLI, "name", "about", handler, long_about = "details")` registers the invocation
 `fairway <namespace> <name>`.
+
+Register `fairway_cli::help` for the namespace itself, as in the example below.
 
 CLI arguments are described by a type implementing `clap::Args`;
 the handler receives a value of that type.
@@ -50,7 +57,13 @@ the handler receives a value of that type.
 
 use fairway_cli::Shutdown;
 
-fairway_cli::namespace!(CLI, "text", "Text commands");
+fairway_cli::namespace!(CLI, "text");
+fairway_cli::command!(
+    CLI,
+    "Text commands",
+    fairway_cli::help,
+    long_about = "Convert text to uppercase or repeat it a chosen number of times.",
+);
 
 #[derive(clap::Args)]
 struct Upper {
@@ -86,8 +99,20 @@ async fn repeat(args: Repeat, shutdown: Shutdown) -> anyhow::Result<()> {
     Ok(())
 }
 
-fairway_cli::command!(CLI, "upper", "Convert text to uppercase", upper);
-fairway_cli::command!(CLI, "repeat", "Repeat text", repeat);
+fairway_cli::command!(
+    CLI,
+    "upper",
+    "Convert text to uppercase",
+    upper,
+    long_about = "Convert the supplied text to uppercase and print the result.",
+);
+fairway_cli::command!(
+    CLI,
+    "repeat",
+    "Repeat text",
+    repeat,
+    long_about = "Print the supplied text on separate lines. Use --times to choose how many times.",
+);
 ```
 
 ```console
@@ -121,7 +146,13 @@ use axum::{Router, routing::get};
 use fairway_cli::Shutdown;
 use tokio::net::TcpListener;
 
-fairway_cli::namespace!(CLI, "http", "HTTP server");
+fairway_cli::namespace!(CLI, "http");
+fairway_cli::command!(
+    CLI,
+    "HTTP server",
+    fairway_cli::help,
+    long_about = "Commands for running an HTTP server.",
+);
 
 #[derive(clap::Args)]
 struct Serve {
@@ -147,7 +178,14 @@ async fn serve(args: Serve, shutdown: Shutdown) -> anyhow::Result<()> {
     Ok(())
 }
 
-fairway_cli::command!(CLI, "serve", "Start the server", serve, workers = |args: &Serve| args.workers);
+fairway_cli::command!(
+    CLI,
+    "serve",
+    "Start the server",
+    serve,
+    long_about = "Serve the /health endpoint. Use --listen to choose the address.",
+    workers = |args: &Serve| args.workers,
+);
 ```
 
 ```console,ignore
@@ -158,18 +196,20 @@ $ fairway http serve --listen 127.0.0.1:9000 --workers 4
 
 ### Registration
 
-- `namespace!(CLI, "name", "about")` declares
+- `namespace!(CLI, "name")` declares
   `pub(crate) static CLI: Namespace` for `fairway name`.
-- `command!(CLI, "name", "about", handler)` adds a subcommand.
-- `command!(CLI, "about", handler)` sets the handler for `fairway <namespace>`.
+- `command!(CLI, "name", "about", handler, long_about = "details")` adds a subcommand.
+- `command!(CLI, "about", handler, long_about = "details")` sets the handler for `fairway <namespace>`.
 
 Namespace names are unique across the application; command names are unique within a namespace.
-A namespace registers either subcommands or a handler for the namespace itself.
+A namespace registers a regular handler or `fairway_cli::help`.
+The latter permits subcommands; invoking the namespace itself displays
+full help and exits with code 0.
 The application test checks for namespaces without commands and duplicate
 names: `cargo test -p fairway`.
 The check covers the plugins and Cargo features included in that build;
-`cargo build` does not run it. Mixing the two kinds of commands or registering
-a second handler for the namespace itself causes a compilation error.
+`cargo build` does not run it. Mixing a regular namespace handler with subcommands
+or registering a second namespace action causes a compilation error.
 Names must be nonempty and contain no whitespace or control characters.
 
 The name `help` is reserved for built-in help. A namespace or subcommand
@@ -180,8 +220,14 @@ with this name is a compile error.
 `fairway-cli` automatically generates `--help` output for the application,
 a command namespace, and an individual subcommand.
 
-`about` provides the help description; doc comments on argument fields
-provide CLI parameter descriptions.
+Every `command!` requires both descriptions: `about` for command lists
+and `-h`, and `long_about` for `--help`. Doc comments on argument fields
+provide CLI parameter descriptions. Descriptions on the argument type itself
+do not replace the text from `command!`.
+
+`fairway_cli::help` displays help before loading configuration or creating a runtime.
+It can be imported with `use fairway_cli::help;` or under another name.
+The `workers` parameter is not allowed for this action.
 
 ### Handlers
 

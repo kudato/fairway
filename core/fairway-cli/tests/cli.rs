@@ -6,10 +6,16 @@ use std::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use fairway_cli::__private::{Cli, PreparedCommand, Threading};
-use fairway_cli::Shutdown;
+use fairway_cli::{Shutdown, help as namespace_help};
 
-fairway_cli::namespace!(CLI, "text", "Text commands");
-fairway_cli::namespace!(HELLO, "hello", "Greeting");
+fairway_cli::namespace!(CLI, "text");
+fairway_cli::command!(
+    CLI,
+    "Text commands",
+    namespace_help,
+    long_about = "Commands for processing text.\n\nChoose a command from the list below."
+);
+fairway_cli::namespace!(HELLO, "hello");
 
 static OUTPUT: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
@@ -25,9 +31,22 @@ async fn hello(_: Shutdown) -> anyhow::Result<()> {
     note("hello");
     Ok(())
 }
-fairway_cli::command!(HELLO, "Print a greeting", hello);
+fairway_cli::command!(
+    HELLO,
+    "Greeting",
+    hello,
+    long_about = "Print a greeting.\n\nThe greeting is written to standard output."
+);
 
+/// Argument type description that must not become the command description.
+///
+/// Argument type details that must not become the command's full help.
 #[derive(clap::Args)]
+#[command(
+    about = "Ignored argument about",
+    long_about = "Ignored argument long_about",
+    after_help = "Extra argument help"
+)]
 struct Repeat {
     /// Text to repeat.
     text: String,
@@ -40,7 +59,22 @@ async fn repeat(args: Repeat, _: Shutdown) -> anyhow::Result<()> {
     note(args.text.repeat(args.times));
     Ok(())
 }
-fairway_cli::command!(CLI, "repeat", "Repeat text", repeat);
+fairway_cli::command!(
+    CLI,
+    "repeat",
+    "Repeat text",
+    repeat,
+    long_about =
+        "Repeat text the requested number of times.\n\nExample: fairway text repeat hi --times 3"
+);
+
+fairway_cli::namespace!(ECHO, "echo");
+fairway_cli::command!(
+    ECHO,
+    "Echo text",
+    repeat,
+    long_about = "Print the supplied text repeatedly.\n\nExample: fairway echo hi --times 3"
+);
 
 async fn observe(shutdown: Shutdown) -> anyhow::Result<()> {
     assert!(shutdown.is_requested());
@@ -48,19 +82,37 @@ async fn observe(shutdown: Shutdown) -> anyhow::Result<()> {
     note("observed");
     Ok(())
 }
-fairway_cli::command!(CLI, "observe", "Observe shutdown", observe);
+fairway_cli::command!(
+    CLI,
+    "observe",
+    "Observe shutdown",
+    observe,
+    long_about = "Observe shutdown"
+);
 
 async fn both(args: Repeat, shutdown: Shutdown) -> anyhow::Result<()> {
     assert!(shutdown.is_requested());
     note(args.text.repeat(args.times));
     Ok(())
 }
-fairway_cli::command!(CLI, "both", "Arguments and shutdown", both);
+fairway_cli::command!(
+    CLI,
+    "both",
+    "Arguments and shutdown",
+    both,
+    long_about = "Arguments and shutdown"
+);
 
 async fn fail(_: Shutdown) -> anyhow::Result<()> {
     anyhow::bail!("command failed");
 }
-fairway_cli::command!(CLI, "fail", "Return an error", fail);
+fairway_cli::command!(
+    CLI,
+    "fail",
+    "Return an error",
+    fail,
+    long_about = "Return an error"
+);
 
 async fn flavor(_: Shutdown) -> anyhow::Result<()> {
     let handle = tokio::runtime::Handle::current();
@@ -71,9 +123,29 @@ async fn flavor(_: Shutdown) -> anyhow::Result<()> {
     ));
     Ok(())
 }
-fairway_cli::command!(CLI, "single", "One execution thread", flavor);
-fairway_cli::command!(CLI, "fixed", "Two worker threads", flavor, workers = 2);
-fairway_cli::command!(CLI, "available", "Available cores", flavor, workers = 0);
+fairway_cli::command!(
+    CLI,
+    "single",
+    "One execution thread",
+    flavor,
+    long_about = "One execution thread"
+);
+fairway_cli::command!(
+    CLI,
+    "fixed",
+    "Two worker threads",
+    flavor,
+    long_about = "Two worker threads",
+    workers = 2
+);
+fairway_cli::command!(
+    CLI,
+    "available",
+    "Available cores",
+    flavor,
+    long_about = "Available cores",
+    workers = 0
+);
 
 #[derive(clap::Args)]
 struct Pool {
@@ -89,6 +161,7 @@ fairway_cli::command!(
     "pool",
     "Workers from arguments",
     pool,
+    long_about = "Workers from arguments",
     workers = |args: &Pool| args.workers
 );
 
@@ -99,7 +172,13 @@ mod sibling {
         super::note("sibling");
         Ok(())
     }
-    fairway_cli::command!(ALIAS, "upper", "Registered from another module", upper);
+    fairway_cli::command!(
+        ALIAS,
+        "upper",
+        "Registered from another module",
+        upper,
+        long_about = "Registered from another module"
+    );
 }
 
 fn cli() -> Cli {
@@ -126,6 +205,10 @@ async fn commands_receive_positionals_options_and_defaults() {
     assert!(recorded("aaa"));
     run(&["fairway", "text", "upper"]).await.unwrap();
     assert!(recorded("sibling"));
+    run(&["fairway", "echo", "echo", "--times", "1"])
+        .await
+        .unwrap();
+    assert!(recorded("echo"));
 }
 
 #[tokio::test]
@@ -181,19 +264,82 @@ fn help_uses_declarations_and_field_comments() {
         .expect("expected help")
         .to_string();
     assert!(root.contains("CLI tests"), "{root}");
-    let help = parse(&["fairway", "text", "repeat", "--help"])
-        .err()
-        .expect("expected help")
-        .to_string();
-    assert!(help.contains("Repeat text"), "{help}");
-    assert!(help.contains("Number of repetitions"), "{help}");
-    assert!(help.contains("--times"), "{help}");
-    assert!(help.contains("--help"), "{help}");
+    assert!(root.contains("Text commands"), "{root}");
+    assert!(root.contains("Greeting"), "{root}");
+    for (args, description, example) in [
+        (
+            vec!["fairway", "text", "repeat", "--help"],
+            "Repeat text the requested number of times.",
+            "Example: fairway text repeat hi --times 3",
+        ),
+        (
+            vec!["fairway", "echo", "--help"],
+            "Print the supplied text repeatedly.",
+            "Example: fairway echo hi --times 3",
+        ),
+    ] {
+        let help = parse(&args).err().expect("expected help").to_string();
+        assert!(help.starts_with(description), "{help}");
+        assert!(help.contains(example), "{help}");
+        assert!(help.contains("Number of repetitions"), "{help}");
+        assert!(help.contains("--times"), "{help}");
+        assert!(help.contains("--help"), "{help}");
+        assert!(help.contains("Extra argument help"), "{help}");
+        assert!(!help.contains("Ignored argument"), "{help}");
+        assert!(!help.contains("Argument type"), "{help}");
+    }
     let hello = parse(&["fairway", "hello", "--help"])
         .err()
         .expect("expected help")
         .to_string();
-    assert!(hello.contains("Greeting\n\nPrint a greeting"), "{hello}");
+    assert!(
+        hello.contains("Print a greeting.\n\nThe greeting is written to standard output."),
+        "{hello}"
+    );
+}
+
+#[test]
+fn namespace_action_shows_full_help_and_short_help_uses_about() {
+    let default = parse(&["fairway", "text"]).err().expect("expected help");
+    let explicit = parse(&["fairway", "text", "--help"])
+        .err()
+        .expect("expected help");
+    assert_eq!(default.kind(), clap::error::ErrorKind::DisplayHelp);
+    assert_eq!(default.exit_code(), 0);
+    assert!(!default.use_stderr());
+    assert_eq!(default.to_string(), explicit.to_string());
+    assert!(
+        default
+            .to_string()
+            .contains("Commands for processing text.")
+    );
+    assert!(default.to_string().contains("Usage: fairway text"));
+    for (args, short, long) in [
+        (
+            vec!["fairway", "text", "-h"],
+            "Text commands",
+            "Commands for processing text.",
+        ),
+        (
+            vec!["fairway", "hello", "-h"],
+            "Greeting",
+            "Print a greeting.",
+        ),
+        (
+            vec!["fairway", "text", "repeat", "-h"],
+            "Repeat text",
+            "Repeat text the requested number of times.",
+        ),
+        (
+            vec!["fairway", "echo", "-h"],
+            "Echo text",
+            "Print the supplied text repeatedly.",
+        ),
+    ] {
+        let help = parse(&args).err().expect("expected help").to_string();
+        assert!(help.starts_with(short), "{help}");
+        assert!(!help.contains(long), "{help}");
+    }
 }
 
 #[test]
@@ -204,7 +350,8 @@ fn help_version_and_invalid_arguments_are_returned_to_the_application() {
         (vec!["fairway", "text", "--help"], 0),
         (vec!["fairway", "text", "repeat", "--help"], 0),
         (vec!["fairway"], 2),
-        (vec!["fairway", "text"], 2),
+        (vec!["fairway", "text"], 0),
+        (vec!["fairway", "text", "unknown"], 2),
         (vec!["fairway", "text", "repeat"], 2),
         (vec!["fairway", "text", "repeat", "x", "--times", "bad"], 2),
         (vec!["fairway", "hello", "--unknown"], 2),

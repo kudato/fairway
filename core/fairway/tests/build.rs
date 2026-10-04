@@ -190,14 +190,16 @@ fn rejected(output: Output, diagnostic: &str) {
 fn plugins_register_and_application_tests_reject_conflicts() {
     let fixture = Fixture::new();
     let a = r#"#![deny(warnings)]
-fw::namespace!(CLI, "shared", "First plugin");
+fw::namespace!(CLI, "shared");
 async fn run(_: fw::Shutdown) -> anyhow::Result<()> { panic!("validation must not run handlers") }
-fw::command!(CLI, "First plugin", run);
+fw::command!(CLI, "First plugin", run, long_about = "First plugin");
 "#;
     let b = r#"#![deny(warnings)]
-fw::namespace!(CLI, "second", "Second plugin");
+fw::namespace!(CLI, "second");
+use fw::help as usage;
+fw::command!(CLI, "Second plugin", usage, long_about = "Show the second plugin commands.");
 async fn run(_: fw::Shutdown) -> anyhow::Result<()> { panic!("validation must not run handlers") }
-fw::command!(CLI, "run", "Run", run);
+fw::command!(CLI, "run", "Run", run, long_about = "Run");
 "#;
     fixture.write("plugin-a/src/lib.rs", a);
     fixture.write("plugin-b/src/lib.rs", b);
@@ -208,10 +210,21 @@ fw::command!(CLI, "run", "Run", run);
     assert!(help.contains("First plugin"), "{help}");
     assert!(help.contains("Second plugin"), "{help}");
     successful(fixture.check(false));
+    let namespace_help = fixture.run(&["second"]);
+    assert_eq!(namespace_help.status.code(), Some(0), "{namespace_help:?}");
+    assert!(namespace_help.stderr.is_empty(), "{namespace_help:?}");
+    assert!(
+        String::from_utf8_lossy(&namespace_help.stdout)
+            .contains("Show the second plugin commands.")
+    );
+    assert_eq!(
+        namespace_help.stdout,
+        fixture.run(&["second", "--help"]).stdout
+    );
 
     fixture.write(
         "plugin-b/src/lib.rs",
-        "#![deny(warnings)]\nfw::namespace!(CLI, \"empty\", \"Empty namespace\");\n",
+        "#![deny(warnings)]\nfw::namespace!(CLI, \"empty\");\n",
     );
     for release in [false, true] {
         successful(fixture.build(release));
@@ -228,109 +241,107 @@ fw::command!(CLI, "run", "Run", run);
     let cases = [
         (
             r#"
-fw::namespace!(CLI, "sample", "Sample");
+fw::namespace!(CLI, "sample");
 async fn run(_: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
-fw::command!(CLI, "Own", run);
-fw::command!(CLI, "named", "Named", run);
+fw::command!(CLI, "Own", run, long_about = "Own");
+fw::command!(CLI, "named", "Named", run, long_about = "Named");
+"#,
+            "a namespace with subcommands must use fairway_cli::help",
+        ),
+        (
+            r#"
+fw::namespace!(CLI, "sample");
+async fn run(_: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
+fw::command!(CLI, "named", "Named", run, long_about = "Named");
+fw::command!(CLI, "Own", run, long_about = "Own");
+"#,
+            "a namespace with subcommands must use fairway_cli::help",
+        ),
+        (
+            r#"
+fw::namespace!(CLI, "sample");
+async fn run(_: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
+fw::command!(CLI, "First", run, long_about = "First");
+fw::command!(CLI, "Second", run, long_about = "Second");
 "#,
             "conflicting implementations",
         ),
         (
             r#"
-fw::namespace!(CLI, "sample", "Sample");
-async fn run(_: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
-fw::command!(CLI, "named", "Named", run);
-fw::command!(CLI, "Own", run);
-"#,
-            "conflicting implementations",
-        ),
-        (
-            r#"
-fw::namespace!(CLI, "sample", "Sample");
-async fn run(_: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
-fw::command!(CLI, "First", run);
-fw::command!(CLI, "Second", run);
-"#,
-            "conflicting implementations",
-        ),
-        (
-            r#"
-fw::namespace!(CLI, "sample", "Sample");
+fw::namespace!(CLI, "sample");
 async fn run(_: String, _: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
-fw::command!(CLI, "Bad arguments", run);
+fw::command!(CLI, "Bad arguments", run, long_about = "Bad arguments");
 "#,
             "Handler",
         ),
         (
             r#"
-fw::namespace!(CLI, "sample", "Sample");
+fw::namespace!(CLI, "sample");
 async fn run() -> anyhow::Result<()> { Ok(()) }
-fw::command!(CLI, "Missing shutdown", run);
+fw::command!(CLI, "Missing shutdown", run, long_about = "Missing shutdown");
 "#,
             "Handler",
         ),
         (
             r#"
-fw::namespace!(CLI, "sample", "Sample");
+fw::namespace!(CLI, "sample");
+fw::command!(CLI, "Sample", fw::help, long_about = "Sample");
 #[derive(clap::Args)] struct Args {}
 async fn run(_: Args) -> anyhow::Result<()> { Ok(()) }
-fw::command!(CLI, "run", "Missing shutdown after arguments", run);
+fw::command!(CLI, "run", "Missing shutdown after arguments", run, long_about = "Missing shutdown after arguments");
 "#,
             "Handler",
         ),
         (
             r#"
-fw::namespace!(CLI, "sample", "Sample");
+fw::namespace!(CLI, "sample");
 #[derive(clap::Args)] struct Args {}
 async fn run(_: fw::Shutdown, _: Args) -> anyhow::Result<()> { Ok(()) }
-fw::command!(CLI, "Wrong argument order", run);
+fw::command!(CLI, "Wrong argument order", run, long_about = "Wrong argument order");
 "#,
             "Handler",
         ),
         (
             r#"
-fw::namespace!(CLI, "sample", "Sample");
+fw::namespace!(CLI, "sample");
 async fn run(_: fw::Shutdown) {}
-fw::command!(CLI, "Wrong result", run);
+fw::command!(CLI, "Wrong result", run, long_about = "Wrong result");
 "#,
             "Handler",
         ),
         (
             r#"
-fw::namespace!(CLI, "sample", "Sample");
+fw::namespace!(CLI, "sample");
 fn run(_: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
-fw::command!(CLI, "Synchronous handler", run);
+fw::command!(CLI, "Synchronous handler", run, long_about = "Synchronous handler");
 "#,
             "Handler",
         ),
         (
             r#"
-fw::namespace!(CLI, "sample", "Sample");
+fw::namespace!(CLI, "sample");
 async fn run(_: fw::Shutdown) -> anyhow::Result<()> {
     let local = std::rc::Rc::new(1);
     std::future::pending::<()>().await;
     drop(local);
     Ok(())
 }
-fw::command!(CLI, "Non-Send future", run);
+fw::command!(CLI, "Non-Send future", run, long_about = "Non-Send future");
 "#,
             "Handler",
         ),
         (
             r#"
-fw::namespace!(CLI, "sample", "Sample");
+fw::namespace!(CLI, "sample");
 #[derive(clap::Args)] struct Args { #[arg(long)] workers: String }
 async fn run(_: Args, _: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
-fw::command!(CLI, "Wrong worker count", run, workers = |args: &Args| args.workers.clone());
+fw::command!(CLI, "Wrong worker count", run, long_about = "Wrong worker count", workers = |args: &Args| args.workers.clone());
 "#,
             "usize",
         ),
+        ("fw::namespace!(CLI, \"\");", "a CLI name cannot be empty"),
         (
-            "fw::namespace!(CLI, \"\", \"Empty\");",
-            "a CLI name cannot be empty",
-        ),
-        (
-            "fw::namespace!(CLI, \"two words\", \"Invalid name\");",
+            "fw::namespace!(CLI, \"two words\");",
             "a CLI name cannot contain whitespace or control characters",
         ),
     ];
@@ -339,18 +350,69 @@ fw::command!(CLI, "Wrong worker count", run, workers = |args: &Args| args.worker
         rejected(fixture.build(false), diagnostic);
     }
 
+    let cases = [
+        (
+            r#"fw::namespace!(CLI, "sample");
+fw::command!(CLI, "Sample", fw::help);"#,
+            "unexpected end of macro invocation",
+        ),
+        (
+            r#"fw::namespace!(CLI, "sample");
+fw::command!(CLI, "Sample", fw::help, long_about = "Sample commands");
+async fn run(_: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
+fw::command!(CLI, "run", "Run", run);"#,
+            "unexpected end of macro invocation",
+        ),
+        (
+            r#"fw::namespace!(CLI, "sample");
+fw::command!(CLI, fw::help, long_about = "Sample commands");"#,
+            "no rules expected",
+        ),
+        (
+            r#"fw::namespace!(CLI, "sample");
+async fn run(_: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
+fw::command!(CLI, "run", "Run", run, long_about = "Run the command");"#,
+            "NamespaceCommand",
+        ),
+        (
+            r#"fw::namespace!(CLI, "sample");
+fw::command!(CLI, "Sample", fw::help, long_about = "Sample commands", workers = 2);"#,
+            "fairway_cli::help does not use workers",
+        ),
+        (
+            r#"fw::namespace!(CLI, "sample");
+fw::command!(CLI, "Sample", fw::help, long_about = "Sample commands");
+fw::command!(CLI, "nested", "Nested", fw::help, long_about = "Nested commands");"#,
+            "fairway_cli::help can only handle a namespace",
+        ),
+        (
+            r#"fw::namespace!(CLI, "sample");
+async fn help(_: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
+fw::command!(CLI, "Sample", help, long_about = "An ordinary handler named help");
+fw::command!(CLI, "run", "Run", help, long_about = "Run the command");"#,
+            "a namespace with subcommands must use fairway_cli::help",
+        ),
+    ];
+    for (source, diagnostic) in cases {
+        fixture.write("plugin-b/src/lib.rs", source);
+        for release in [false, true] {
+            rejected(fixture.build(release), diagnostic);
+        }
+    }
+
     for name in [
         r"two\u{a0}words",
         r"two\u{3000}words",
         r"two\u{85}words",
         r"two\u{9f}words",
     ] {
-        let namespace = format!(r#"fw::namespace!(CLI, "{name}", "Invalid namespace");"#);
+        let namespace = format!(r#"fw::namespace!(CLI, "{name}");"#);
         let command = format!(
             r#"
-fw::namespace!(CLI, "sample", "Sample");
+fw::namespace!(CLI, "sample");
+fw::command!(CLI, "Sample", fw::help, long_about = "Sample");
 async fn run(_: fw::Shutdown) -> anyhow::Result<()> {{ Ok(()) }}
-fw::command!(CLI, "{name}", "Invalid subcommand", run);
+fw::command!(CLI, "{name}", "Invalid subcommand", run, long_about = "Invalid subcommand");
 "#
         );
         for (source, declaration) in [(namespace, "fw::namespace!"), (command, "fw::command!")] {
@@ -371,15 +433,13 @@ fw::command!(CLI, "{name}", "Invalid subcommand", run);
     // Check the name's value, including raw and escaped string literals,
     // and point to the declaration in both build profiles.
     let cases = [
-        (
-            r#"fw::namespace!(CLI, r"help", "Reserved namespace");"#,
-            "fw::namespace!",
-        ),
+        (r#"fw::namespace!(CLI, r"help");"#, "fw::namespace!"),
         (
             r#"
-fw::namespace!(CLI, "sample", "Sample");
+fw::namespace!(CLI, "sample");
+fw::command!(CLI, "Sample", fw::help, long_about = "Sample");
 async fn run(_: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
-fw::command!(CLI, "h\u{65}lp", "Reserved subcommand", run);
+fw::command!(CLI, "h\u{65}lp", "Reserved subcommand", run, long_about = "Reserved subcommand");
 "#,
             "fw::command!",
         ),
@@ -399,29 +459,31 @@ fw::command!(CLI, "h\u{65}lp", "Reserved subcommand", run);
     let cases = [
         (
             r#"
-fw::namespace!(CLI, "sample", "Sample");
+fw::namespace!(CLI, "sample");
+fw::command!(CLI, "Sample", fw::help, long_about = "Sample");
 async fn run(_: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
 mod first {
     use super::CLI;
-    fw::command!(CLI, "duplicate", "First", super::run);
+    fw::command!(CLI, "duplicate", "First", super::run, long_about = "First");
 }
 mod second {
     use super::CLI as ALIAS;
-    fw::command!(ALIAS, r"duplicate", "Second", super::run);
+    fw::command!(ALIAS, r"duplicate", "Second", super::run, long_about = "Second");
 }
 "#,
             "command \"sample duplicate\" is declared twice",
         ),
         (
             r#"
-fw::namespace!(CLI, "sample", "Sample");
+fw::namespace!(CLI, "sample");
+fw::command!(CLI, "Sample", fw::help, long_about = "Sample");
 #[derive(clap::Args)]
 struct Args {
     #[arg(long = "value")] first: String,
     #[arg(long = "value")] second: String,
 }
 async fn run(_: Args, _: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
-fw::command!(CLI, "run", "Bad options", run);
+fw::command!(CLI, "run", "Bad options", run, long_about = "Bad options");
 "#,
             "Long option names must be unique",
         ),
@@ -436,19 +498,23 @@ fw::command!(CLI, "run", "Bad options", run);
         "plugin-b/src/lib.rs",
         r#"
 #![deny(warnings)]
-fw::namespace!(CLI, "sample", "Sample");
-fw::namespace!(OTHER, "another", "Another namespace");
-fw::namespace!(HELPERS, "help-tools", "help");
-fw::namespace!(UNICODE, "café", "Unicode namespace");
+fw::namespace!(CLI, "sample");
+fw::command!(CLI, "Sample", fw::help, long_about = "Sample");
+fw::namespace!(OTHER, "another");
+fw::command!(OTHER, "Another namespace", fw::help, long_about = "Another namespace");
+fw::namespace!(HELPERS, "help-tools");
+fw::command!(HELPERS, "help", fw::help, long_about = "help");
+fw::namespace!(UNICODE, "café");
+fw::command!(UNICODE, "Unicode namespace", fw::help, long_about = "Unicode namespace");
 #[derive(clap::Args)]
 struct Args { #[arg(long)] workers: usize }
 async fn run(_: Args, _: fw::Shutdown) -> anyhow::Result<()> { panic!("handler must not run in validation") }
-fw::command!(CLI, "run", "Run", run, workers = |_: &Args| -> usize {
+fw::command!(CLI, "run", "Run", run, long_about = "Run", workers = |_: &Args| -> usize {
     panic!("worker selector must not run in validation")
 });
-fw::command!(OTHER, "run", "Same command name in another namespace", run);
-fw::command!(HELPERS, "helpful", "help", run);
-fw::command!(UNICODE, "данные-猫-🌍", "Unicode subcommand", run);
+fw::command!(OTHER, "run", "Same command name in another namespace", run, long_about = "Same command name in another namespace");
+fw::command!(HELPERS, "helpful", "help", run, long_about = "help");
+fw::command!(UNICODE, "данные-猫-🌍", "Unicode subcommand", run, long_about = "Unicode subcommand");
 "#,
     );
     successful(fixture.build(false));

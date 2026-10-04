@@ -7,9 +7,15 @@ use std::sync::Barrier;
 use fairway_cli::__private::{Cli, PreparedCommand, Threading};
 use fairway_cli::Shutdown;
 
-fairway_cli::namespace!(FIRST, "first", "First namespace");
-fairway_cli::namespace!(TOOLS, "tools", "Named commands");
-fairway_cli::namespace!(LAST, "last", "Last namespace");
+fairway_cli::namespace!(FIRST, "first");
+fairway_cli::namespace!(TOOLS, "tools");
+fairway_cli::command!(
+    TOOLS,
+    "Named commands",
+    fairway_cli::help,
+    long_about = "Named commands"
+);
+fairway_cli::namespace!(LAST, "last");
 
 thread_local! {
     static OPTION: Cell<&'static str> = const { Cell::new("workers-a") };
@@ -37,15 +43,48 @@ fn workers(args: &Arguments) -> usize {
     args.workers
 }
 
-fairway_cli::command!(TOOLS, "alpha", "First command", named, workers = workers);
-fairway_cli::command!(TOOLS, "middle", "Middle command", named, workers = workers);
-fairway_cli::command!(TOOLS, "zulu", "Last command", named, workers = workers);
+fairway_cli::command!(
+    TOOLS,
+    "alpha",
+    "First command",
+    named,
+    long_about = "First command",
+    workers = workers
+);
+fairway_cli::command!(
+    TOOLS,
+    "middle",
+    "Middle command",
+    named,
+    long_about = "Middle command",
+    workers = workers
+);
+fairway_cli::command!(
+    TOOLS,
+    "zulu",
+    "Last command",
+    named,
+    long_about = "Last command",
+    workers = workers
+);
 
 async fn own(_: Shutdown) -> anyhow::Result<()> {
     panic!("parsing must not run handlers");
 }
-fairway_cli::command!(FIRST, "First handler", own, workers = 2);
-fairway_cli::command!(LAST, "Last handler", own, workers = 3);
+fairway_cli::command!(
+    FIRST,
+    "First handler",
+    own,
+    long_about = "First handler",
+    workers = 2
+);
+fairway_cli::command!(
+    LAST,
+    "Last handler",
+    own,
+    long_about = "Last handler",
+    workers = 3
+);
 
 fn parse(
     name: &'static str,

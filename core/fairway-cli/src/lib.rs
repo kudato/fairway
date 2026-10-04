@@ -3,7 +3,7 @@
 //! ```
 //! use fairway_cli::Shutdown;
 //!
-//! fairway_cli::namespace!(CLI, "hello", "Print a greeting");
+//! fairway_cli::namespace!(CLI, "hello");
 //!
 //! async fn hello(shutdown: Shutdown) -> anyhow::Result<()> {
 //!     if shutdown.is_requested() {
@@ -13,7 +13,8 @@
 //!     Ok(())
 //! }
 //!
-//! fairway_cli::command!(CLI, "Print a greeting", hello);
+//! fairway_cli::command!(CLI, "Print a greeting", hello,
+//!     long_about = "Write Hello, world! to standard output.");
 //! ```
 //!
 //! A handler takes a [`Shutdown`], optionally preceded by arguments
@@ -38,14 +39,18 @@ mod guide_en {}
 
 use tokio_util::sync::CancellationToken;
 
+#[doc(inline)]
+pub use handler::Help as help;
 pub use registry::Namespace;
 
 // Paths used by Fairway and macro expansions in plugin crates.
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::handler::{PreparedCommand, Threading, augment, prepare};
+    pub use crate::handler::{Action, PreparedCommand, Threading, augment, is_help, prepare};
     pub use crate::parse::Cli;
-    pub use crate::registry::{Command, CommandKind, FAIRWAY_CLI_COMMANDS, FAIRWAY_CLI_NAMESPACES};
+    pub use crate::registry::{
+        Command, FAIRWAY_CLI_COMMANDS, FAIRWAY_CLI_NAMESPACES, NamespaceCommand,
+    };
     pub use clap;
     pub use linkme;
 }

@@ -3,16 +3,17 @@
 /// Declares `pub(crate) static NAME: Namespace` for `fairway <name>`.
 ///
 /// Namespace names must be unique across the linked application.
-/// Each namespace must have its own handler or at least one subcommand.
-/// The application's registry test checks these requirements.
+/// Register the namespace's descriptions and action with [`command!`](crate::command).
+/// Use [`help`](crate::help) for a namespace containing subcommands.
+/// The application's registry test checks unique names and missing commands.
 /// The name `help` is reserved for built-in help and is a compile error.
 ///
 /// ```
-/// fairway_cli::namespace!(CLI, "text", "Text commands");
+/// fairway_cli::namespace!(CLI, "text");
 /// ```
 #[macro_export]
 macro_rules! namespace {
-    ($id:ident, $name:literal, $about:literal $(,)?) => {
+    ($id:ident, $name:literal $(,)?) => {
         #[$crate::__private::linkme::distributed_slice($crate::__private::FAIRWAY_CLI_NAMESPACES)]
         #[linkme(crate = $crate::__private::linkme)]
         #[allow(
@@ -21,7 +22,6 @@ macro_rules! namespace {
         )]
         pub(crate) static $id: $crate::Namespace = $crate::Namespace::new(
             $name,
-            $about,
             ::core::concat!(
                 ::core::module_path!(),
                 " (",
@@ -41,13 +41,18 @@ macro_rules! namespace {
     };
 }
 
-/// Registers a handler in a namespace declared by [`namespace!`].
+/// Registers a command in a namespace declared by [`namespace!`].
 ///
-/// `command!(CLI, "about", handler)` handles `fairway <namespace>`.
-/// `command!(CLI, "name", "about", handler)` adds a subcommand.
-/// A namespace supports one of these forms, never both; mixing them is
-/// a compile error. Duplicate subcommand names are checked by the
-/// application's registry test.
+/// `command!(CLI, "about", handler, long_about = "details")` handles
+/// `fairway <namespace>`. Adding a name before `"about"` declares a subcommand.
+/// Both descriptions are required: `about` is used in command lists and `-h`,
+/// and `long_about` in `--help`. They override descriptions on the argument type.
+///
+/// Register [`help`](crate::help) as the namespace's action to allow subcommands.
+/// Invoking that namespace prints its full help and exits with code 0.
+/// A regular namespace handler cannot coexist with subcommands.
+/// Missing namespace registrations and incompatible actions are compile errors.
+/// Duplicate subcommand names are checked by the application's registry test.
 /// The subcommand name `help` is reserved for built-in help and is a compile error.
 ///
 /// The handler takes [`Shutdown`](crate::Shutdown), optionally preceded by
@@ -57,11 +62,14 @@ macro_rules! namespace {
 /// the available parallelism. Without `workers`, Fairway runs the command
 /// on one execution thread. A selector such as `workers = |args: &Serve|
 /// args.workers` reads the parsed arguments before Fairway creates the runtime.
+/// The built-in `help` action does not accept `workers`.
 ///
 /// ```
 /// use fairway_cli::Shutdown;
 ///
-/// fairway_cli::namespace!(CLI, "text", "Text commands");
+/// fairway_cli::namespace!(CLI, "text");
+/// fairway_cli::command!(CLI, "Text commands", fairway_cli::help,
+///     long_about = "Commands for working with text.");
 ///
 /// #[derive(clap::Args)]
 /// struct Upper {
@@ -77,23 +85,30 @@ macro_rules! namespace {
 ///     Ok(())
 /// }
 ///
-/// fairway_cli::command!(CLI, "upper", "Convert text to uppercase", upper);
+/// fairway_cli::command!(CLI, "upper", "Convert text to uppercase", upper,
+///     long_about = "Convert the supplied text to uppercase and print the result.");
 /// ```
 #[macro_export]
 macro_rules! command {
-    ($ns:ident, $name:literal, $about:literal, $run:path $(, workers = $workers:expr)? $(,)?) => {
+    ($ns:ident, $name:literal, $about:literal, $run:path, long_about = $long_about:literal $(, workers = $workers:expr)? $(,)?) => {
         const _: () = {
-            #[allow(dead_code)]
-            struct Named;
-            impl $crate::__private::CommandKind<Named> for $ns::Key {}
-            $crate::__declare!($ns, ::core::option::Option::Some($name), $about, $run $(, $workers)?);
+            assert!(
+                <$ns::Key as $crate::__private::NamespaceCommand>::IS_HELP,
+                "a namespace with subcommands must use fairway_cli::help",
+            );
+            assert!(
+                !$crate::__private::is_help(&$run),
+                "fairway_cli::help can only handle a namespace",
+            );
+            $crate::__declare!($ns, ::core::option::Option::Some($name), $about, $long_about, $run $(, $workers)?);
         };
     };
-    ($ns:ident, $about:literal, $run:path $(, workers = $workers:expr)? $(,)?) => {
+    ($ns:ident, $about:literal, $run:path, long_about = $long_about:literal $(, workers = $workers:expr)? $(,)?) => {
         const _: () = {
-            // Conflicts with every named command, or a second own handler.
-            impl<T> $crate::__private::CommandKind<T> for $ns::Key {}
-            $crate::__declare!($ns, ::core::option::Option::None, $about, $run $(, $workers)?);
+            impl $crate::__private::NamespaceCommand for $ns::Key {
+                const IS_HELP: bool = $crate::__private::is_help(&$run);
+            }
+            $crate::__declare!($ns, ::core::option::Option::None, $about, $long_about, $run $(, $workers)?);
         };
     };
 }
@@ -101,15 +116,15 @@ macro_rules! command {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __declare {
-    ($ns:ident, $name:expr, $about:literal, $run:path $(, $workers:expr)?) => {
+    ($ns:ident, $name:expr, $about:literal, $long_about:literal, $run:path $(, $workers:expr)?) => {
         fn augment(command: $crate::__private::clap::Command) -> $crate::__private::clap::Command {
             $crate::__private::augment($run, command)
         }
 
         fn prepare(
             matches: &mut $crate::__private::clap::ArgMatches,
-        ) -> ::core::result::Result<$crate::__private::PreparedCommand, $crate::__private::clap::Error> {
-            $crate::__private::prepare($run, matches, $crate::__workers!($($workers)?))
+        ) -> ::core::result::Result<$crate::__private::Action, $crate::__private::clap::Error> {
+            $crate::__private::prepare($run, matches, $crate::__workers!($run $(, $workers)?))
         }
 
         #[$crate::__private::linkme::distributed_slice($crate::__private::FAIRWAY_CLI_COMMANDS)]
@@ -118,7 +133,8 @@ macro_rules! __declare {
         static COMMAND: $crate::__private::Command = $crate::__private::Command::new(
             &$ns,
             $name,
-            $about,
+            ($about, $long_about),
+            $crate::__private::is_help(&$run),
             augment,
             prepare,
             ::core::concat!(::core::module_path!(), " (", ::core::file!(), ":", ::core::line!(), ")"),
@@ -129,10 +145,14 @@ macro_rules! __declare {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __workers {
-    () => {
+    ($run:path) => {
         $crate::__private::Threading::CurrentThread
     };
-    ($workers:expr) => {
+    ($run:path, $workers:expr) => {{
+        const _: () = assert!(
+            !$crate::__private::is_help(&$run),
+            "fairway_cli::help does not use workers",
+        );
         $workers
-    };
+    }};
 }

@@ -21,7 +21,13 @@ use std::{
 use fairway_cli::__private::Cli;
 use fairway_cli::Shutdown;
 
-fairway_cli::namespace!(CLI, "probe", "Process tests");
+fairway_cli::namespace!(CLI, "probe");
+fairway_cli::command!(
+    CLI,
+    "Process tests",
+    fairway_cli::help,
+    long_about = "Process tests"
+);
 
 #[derive(Default, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -35,7 +41,13 @@ async fn settings(_: Shutdown) -> anyhow::Result<()> {
     println!("SETTINGS:{}:{}", SETTINGS.get().value, OTHER.get().value);
     Ok(())
 }
-fairway_cli::command!(CLI, "settings", "Loaded settings", settings);
+fairway_cli::command!(
+    CLI,
+    "settings",
+    "Loaded settings",
+    settings,
+    long_about = "Loaded settings"
+);
 
 async fn flavor(_: Shutdown) -> anyhow::Result<()> {
     tokio::spawn(async {
@@ -49,9 +61,29 @@ async fn flavor(_: Shutdown) -> anyhow::Result<()> {
     .await?;
     Ok(())
 }
-fairway_cli::command!(CLI, "single", "One execution thread", flavor);
-fairway_cli::command!(CLI, "fixed", "Two worker threads", flavor, workers = 2);
-fairway_cli::command!(CLI, "available", "Available cores", flavor, workers = 0);
+fairway_cli::command!(
+    CLI,
+    "single",
+    "One execution thread",
+    flavor,
+    long_about = "One execution thread"
+);
+fairway_cli::command!(
+    CLI,
+    "fixed",
+    "Two worker threads",
+    flavor,
+    long_about = "Two worker threads",
+    workers = 2
+);
+fairway_cli::command!(
+    CLI,
+    "available",
+    "Available cores",
+    flavor,
+    long_about = "Available cores",
+    workers = 0
+);
 
 #[derive(clap::Args)]
 struct Pool {
@@ -67,6 +99,7 @@ fairway_cli::command!(
     "pool",
     "Workers from arguments",
     pool,
+    long_about = "Workers from arguments",
     workers = |args: &Pool| args.workers
 );
 
@@ -74,13 +107,31 @@ async fn prepared(_: Shutdown) -> anyhow::Result<()> {
     println!("HANDLER");
     Ok(())
 }
-fairway_cli::command!(CLI, "prepared", "Prepared application", prepared);
-fairway_cli::command!(CLI, "preparation-error", "Failed preparation", prepared);
+fairway_cli::command!(
+    CLI,
+    "prepared",
+    "Prepared application",
+    prepared,
+    long_about = "Prepared application"
+);
+fairway_cli::command!(
+    CLI,
+    "preparation-error",
+    "Failed preparation",
+    prepared,
+    long_about = "Failed preparation"
+);
 
 async fn error(_: Shutdown) -> anyhow::Result<()> {
     anyhow::bail!("command failed");
 }
-fairway_cli::command!(CLI, "error", "Handler error", error);
+fairway_cli::command!(
+    CLI,
+    "error",
+    "Handler error",
+    error,
+    long_about = "Handler error"
+);
 
 fn ready() {
     println!("READY");
@@ -94,20 +145,38 @@ async fn graceful(shutdown: Shutdown) -> anyhow::Result<()> {
     println!("FINISHED");
     Ok(())
 }
-fairway_cli::command!(CLI, "graceful", "Clean shutdown", graceful);
+fairway_cli::command!(
+    CLI,
+    "graceful",
+    "Clean shutdown",
+    graceful,
+    long_about = "Clean shutdown"
+);
 
 async fn failing(shutdown: Shutdown) -> anyhow::Result<()> {
     ready();
     shutdown.requested().await;
     anyhow::bail!("cleanup failed");
 }
-fairway_cli::command!(CLI, "failing", "Shutdown error", failing);
+fairway_cli::command!(
+    CLI,
+    "failing",
+    "Shutdown error",
+    failing,
+    long_about = "Shutdown error"
+);
 
 async fn pending(_: Shutdown) -> anyhow::Result<()> {
     ready();
     std::future::pending().await
 }
-fairway_cli::command!(CLI, "pending", "Ignored shutdown request", pending);
+fairway_cli::command!(
+    CLI,
+    "pending",
+    "Ignored shutdown request",
+    pending,
+    long_about = "Ignored shutdown request"
+);
 
 async fn blocked(_: Shutdown) -> anyhow::Result<()> {
     ready();
@@ -115,7 +184,13 @@ async fn blocked(_: Shutdown) -> anyhow::Result<()> {
         std::thread::park();
     }
 }
-fairway_cli::command!(CLI, "blocked", "Blocked execution thread", blocked);
+fairway_cli::command!(
+    CLI,
+    "blocked",
+    "Blocked execution thread",
+    blocked,
+    long_about = "Blocked execution thread"
+);
 
 async fn locked(_: Shutdown) -> anyhow::Result<()> {
     let _stderr = std::io::stderr().lock();
@@ -124,7 +199,13 @@ async fn locked(_: Shutdown) -> anyhow::Result<()> {
         std::thread::park();
     }
 }
-fairway_cli::command!(CLI, "locked", "Blocked stderr", locked);
+fairway_cli::command!(
+    CLI,
+    "locked",
+    "Blocked stderr",
+    locked,
+    long_about = "Blocked stderr"
+);
 
 async fn saturated(_: Shutdown) -> anyhow::Result<()> {
     let barrier = Arc::new(Barrier::new(3));
@@ -146,6 +227,7 @@ fairway_cli::command!(
     "saturated",
     "Blocked worker pool",
     saturated,
+    long_about = "Blocked worker pool",
     workers = 2
 );
 
@@ -162,7 +244,13 @@ async fn teardown(_: Shutdown) -> anyhow::Result<()> {
     ready();
     Ok(())
 }
-fairway_cli::command!(CLI, "teardown", "Blocked runtime teardown", teardown);
+fairway_cli::command!(
+    CLI,
+    "teardown",
+    "Blocked runtime teardown",
+    teardown,
+    long_about = "Blocked runtime teardown"
+);
 
 #[test]
 fn child_process() {
@@ -208,7 +296,8 @@ fairway_cli::command!(
     CLI,
     "preparation",
     "Blocked application preparation",
-    preparation
+    preparation,
+    long_about = "Blocked application preparation"
 );
 
 fn child(argument: &str, home: &std::path::Path) -> Command {
@@ -226,7 +315,8 @@ fn child(argument: &str, home: &std::path::Path) -> Command {
 #[test]
 fn help_and_usage_errors_use_the_correct_stream_and_exit_code() {
     let home = tempfile::tempdir().unwrap();
-    for (argument, code) in [("--help", 0), ("--version", 0), ("--unknown", 2)] {
+    std::fs::write(home.path().join("config.toml"), "invalid = [").unwrap();
+    for (argument, code) in [("", 0), ("--help", 0), ("--version", 0), ("--unknown", 2)] {
         let output = child(argument, home.path()).output().unwrap();
         assert_eq!(output.status.code(), Some(code), "{output:?}");
         let stdout = String::from_utf8_lossy(&output.stdout);

@@ -1,6 +1,6 @@
 //! Statically registered namespaces and commands.
 
-use crate::handler::PreparedCommand;
+use crate::handler::Action;
 
 /// A namespace declared by [`namespace!`](crate::namespace).
 ///
@@ -9,19 +9,14 @@ use crate::handler::PreparedCommand;
 /// declaring crate.
 pub struct Namespace {
     pub(crate) name: &'static str,
-    pub(crate) about: &'static str,
     source: &'static str,
 }
 
 impl Namespace {
     #[doc(hidden)]
-    pub const fn new(name: &'static str, about: &'static str, source: &'static str) -> Self {
+    pub const fn new(name: &'static str, source: &'static str) -> Self {
         valid_name(name);
-        Self {
-            name,
-            about,
-            source,
-        }
+        Self { name, source }
     }
 }
 
@@ -58,15 +53,19 @@ const fn valid_name(name: &str) {
 }
 
 #[doc(hidden)]
-pub trait CommandKind<T> {}
+pub trait NamespaceCommand {
+    const IS_HELP: bool;
+}
 
 #[doc(hidden)]
 pub struct Command {
     pub(crate) namespace: &'static Namespace,
     pub(crate) name: Option<&'static str>,
     pub(crate) about: &'static str,
+    pub(crate) long_about: &'static str,
+    pub(crate) is_help: bool,
     pub(crate) augment: fn(clap::Command) -> clap::Command,
-    pub(crate) prepare: fn(&mut clap::ArgMatches) -> Result<PreparedCommand, clap::Error>,
+    pub(crate) prepare: fn(&mut clap::ArgMatches) -> Result<Action, clap::Error>,
     source: &'static str,
 }
 
@@ -75,9 +74,10 @@ impl Command {
     pub const fn new(
         namespace: &'static Namespace,
         name: Option<&'static str>,
-        about: &'static str,
+        descriptions: (&'static str, &'static str),
+        is_help: bool,
         augment: fn(clap::Command) -> clap::Command,
-        prepare: fn(&mut clap::ArgMatches) -> Result<PreparedCommand, clap::Error>,
+        prepare: fn(&mut clap::ArgMatches) -> Result<Action, clap::Error>,
         source: &'static str,
     ) -> Self {
         if let Some(name) = name {
@@ -86,7 +86,9 @@ impl Command {
         Self {
             namespace,
             name,
-            about,
+            about: descriptions.0,
+            long_about: descriptions.1,
+            is_help,
             augment,
             prepare,
             source,
@@ -142,7 +144,11 @@ pub(crate) fn assert_valid() {
                 );
             }
         }
-        if let Some(own) = commands.first().filter(|command| command.name.is_none())
+        let own = commands
+            .first()
+            .filter(|command| command.name.is_none())
+            .expect("each namespace must register its own handler or fairway_cli::help");
+        if !own.is_help
             && let Some(named) = commands.iter().find(|command| command.name.is_some())
         {
             panic!(
