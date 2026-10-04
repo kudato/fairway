@@ -50,15 +50,23 @@ fairway_cli::command!(
 );
 
 async fn flavor(_: Shutdown) -> anyhow::Result<()> {
-    tokio::spawn(async {
+    let caller = std::rc::Rc::new(std::thread::current().id());
+    let task = tokio::spawn(async {
         let handle = tokio::runtime::Handle::current();
         println!(
             "RUNTIME:{:?}:{}",
             handle.runtime_flavor(),
             handle.metrics().num_workers(),
         );
-    })
-    .await?;
+        std::thread::current().id()
+    });
+    tokio::task::yield_now().await;
+    let worker = task.await?;
+    assert_eq!(*caller, std::thread::current().id());
+    let multi_thread = tokio::runtime::Handle::current().runtime_flavor()
+        == tokio::runtime::RuntimeFlavor::MultiThread;
+    assert_eq!(*caller != worker, multi_thread);
+    println!("HANDLER:{caller:?}");
     Ok(())
 }
 fairway_cli::command!(
@@ -94,6 +102,13 @@ struct Pool {
 async fn pool(_: Pool, shutdown: Shutdown) -> anyhow::Result<()> {
     flavor(shutdown).await
 }
+fairway_cli::command!(
+    CLI,
+    "pool-single",
+    "Arguments without workers",
+    pool,
+    long_about = "Arguments without workers"
+);
 fairway_cli::command!(
     CLI,
     "pool",
@@ -262,6 +277,7 @@ fn child_process() {
         args.push("probe");
     }
     args.extend(argument.split_ascii_whitespace());
+    println!("CALLER:{:?}", std::thread::current().id());
     let code = app::run(
         Cli::new("fairway", "1.0", "Process tests"),
         args.into_iter().map(Into::into),
@@ -333,13 +349,14 @@ fn help_and_usage_errors_use_the_correct_stream_and_exit_code() {
 }
 
 #[test]
-fn application_creates_the_requested_runtime() {
+fn application_runs_non_send_handlers_with_the_requested_runtime() {
     let home = tempfile::tempdir().unwrap();
     let available = std::thread::available_parallelism().map_or(1, usize::from);
     for (argument, expected) in [
         ("single", "CurrentThread:1".to_owned()),
         ("fixed", "MultiThread:2".to_owned()),
         ("available", format!("MultiThread:{available}")),
+        ("pool-single", "CurrentThread:1".to_owned()),
         ("pool", "MultiThread:3".to_owned()),
         ("pool --workers 4", "MultiThread:4".to_owned()),
     ] {
@@ -348,6 +365,15 @@ fn application_creates_the_requested_runtime() {
         assert!(output.stderr.is_empty(), "{output:?}");
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains(&format!("RUNTIME:{expected}")), "{stdout}");
+        let caller = stdout
+            .lines()
+            .find_map(|line| line.strip_prefix("CALLER:"))
+            .expect("missing caller thread");
+        let handler = stdout
+            .lines()
+            .find_map(|line| line.strip_prefix("HANDLER:"))
+            .expect("missing handler thread");
+        assert_eq!(caller, handler, "{stdout}");
     }
 }
 

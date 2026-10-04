@@ -232,7 +232,11 @@ $ fairway http serve --listen 127.0.0.1:9000 --workers 4
 
 ### Обработчики
 
-Обработчик — `async fn` с результатом `anyhow::Result<()>` и `Send`-future.
+Обработчик — `async fn` с результатом `anyhow::Result<()>`. Он выполняется
+в главном потоке, в том числе при заданном `workers`, поэтому его future
+не обязан реализовывать `Send`. Для задач `tokio::spawn` требование `Send`
+сохраняется.
+
 Допустимые параметры:
 
 - `(shutdown: Shutdown)`.

@@ -18,8 +18,10 @@
 //! ```
 //!
 //! A handler takes a [`Shutdown`], optionally preceded by arguments
-//! implementing [`clap::Args`]. Its future must be `Send` and return
-//! `anyhow::Result<()>`.
+//! implementing [`clap::Args`], and returns `anyhow::Result<()>`.
+//! Fairway runs the handler on the calling thread, including when `workers`
+//! is set, so its future need not implement `Send`. Futures passed to
+//! `tokio::spawn` must still implement `Send`.
 //!
 //! Fairway owns the runtime, signal handling, and process lifecycle.
 //! Plugins use [`namespace!`], [`command!`], and [`Shutdown`].

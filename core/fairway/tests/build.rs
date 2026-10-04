@@ -36,6 +36,7 @@ cfg = {{ package = "fairway-config", path = {config:?} }}
 serde = {{ version = "1", features = ["derive"] }}
 clap = {{ version = "4", features = ["derive"] }}
 anyhow = "1"
+tokio = {{ version = "1.26", features = ["rt"] }}
 
 [profile.release]
 lto = "thin"
@@ -58,6 +59,7 @@ cfg.workspace = true
 serde.workspace = true
 clap.workspace = true
 anyhow.workspace = true
+tokio.workspace = true
 "#
                 ),
             );
@@ -321,14 +323,16 @@ fw::command!(CLI, "Synchronous handler", run, long_about = "Synchronous handler"
             r#"
 fw::namespace!(CLI, "sample");
 async fn run(_: fw::Shutdown) -> anyhow::Result<()> {
-    let local = std::rc::Rc::new(1);
-    std::future::pending::<()>().await;
-    drop(local);
+    tokio::spawn(async {
+        let local = std::rc::Rc::new(1);
+        std::future::pending::<()>().await;
+        drop(local);
+    }).await?;
     Ok(())
 }
-fw::command!(CLI, "Non-Send future", run, long_about = "Non-Send future");
+fw::command!(CLI, "Non-Send task", run, long_about = "Non-Send task");
 "#,
-            "Handler",
+            "future cannot be sent between threads safely",
         ),
         (
             r#"

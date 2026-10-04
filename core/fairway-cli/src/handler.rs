@@ -12,7 +12,7 @@ use clap::{ArgMatches, Args};
 
 use crate::Shutdown;
 
-type CommandFuture = Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>;
+type CommandFuture = Pin<Box<dyn Future<Output = anyhow::Result<()>>>>;
 type Start = Box<dyn FnOnce(Shutdown) -> CommandFuture>;
 
 /// The execution threads requested by a command.
@@ -93,7 +93,7 @@ pub trait Handler<Signature>: 'static {
 impl<F, Fut> Handler<ShutdownOnly> for F
 where
     F: FnOnce(Shutdown) -> Fut + 'static,
-    Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
+    Fut: Future<Output = anyhow::Result<()>> + 'static,
 {
     type Args = ();
 
@@ -116,7 +116,7 @@ impl<T, F, Fut> Handler<(ArgumentsAndShutdown, T)> for F
 where
     T: Args + 'static,
     F: FnOnce(T, Shutdown) -> Fut + 'static,
-    Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
+    Fut: Future<Output = anyhow::Result<()>> + 'static,
 {
     type Args = T;
 

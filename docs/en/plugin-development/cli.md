@@ -231,7 +231,10 @@ The `workers` parameter is not allowed for this action.
 
 ### Handlers
 
-A handler is an `async fn` returning `anyhow::Result<()>` with a `Send` future.
+A handler is an `async fn` returning `anyhow::Result<()>`. It runs on the
+main thread, including when `workers` is set, so its future need not
+implement `Send`. Tasks passed to `tokio::spawn` still require `Send`.
+
 Supported parameters:
 
 - `(shutdown: Shutdown)`.
