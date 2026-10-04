@@ -256,7 +256,10 @@ This setting does not limit separate threads created by the plugin itself.
 - `requested().await` waits for the request; returns immediately if it has already arrived.
 - `is_requested()` checks whether shutdown has been requested.
 - `clone()` creates a copy that observes the same request.
-- `new()` creates an object with no request source, for tests.
+
+In a test, pass `Shutdown::from(token.clone())` to the handler, where `token`
+is a `tokio_util::sync::CancellationToken`. Call `token.cancel()` to request
+shutdown.
 
 Fairway handles signals and gives the command time to shut down:
 15 seconds by default, configurable at the Fairway level.

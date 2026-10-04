@@ -62,18 +62,12 @@ pub mod __private {
 /// Every command handler receives this observer and must handle its shutdown
 /// request. Fairway handles termination signals and enforces its shutdown
 /// deadline.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Shutdown {
     token: CancellationToken,
 }
 
 impl Shutdown {
-    /// Creates an observer with no source of shutdown requests, for tests.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Whether Fairway has requested shutdown.
     #[must_use]
     pub fn is_requested(&self) -> bool {
@@ -87,7 +81,7 @@ impl Shutdown {
 }
 
 impl From<CancellationToken> for Shutdown {
-    /// Observes the shutdown token controlled by the application.
+    /// Observes shutdown requests from the supplied cancellation token.
     fn from(token: CancellationToken) -> Self {
         Self { token }
     }

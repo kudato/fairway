@@ -190,7 +190,7 @@ fn parse(args: &[&str]) -> Result<PreparedCommand, clap::Error> {
 }
 
 async fn run(args: &[&str]) -> anyhow::Result<()> {
-    parse(args)?.run(Shutdown::new()).await
+    parse(args)?.run(CancellationToken::new().into()).await
 }
 
 #[tokio::test]
