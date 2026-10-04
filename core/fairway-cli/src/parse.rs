@@ -11,8 +11,8 @@ use crate::registry::{Command, FAIRWAY_CLI_COMMANDS, FAIRWAY_CLI_NAMESPACES, Nam
 
 /// The command-line parser used by the Fairway application.
 ///
-/// The application supplies its name, version, and description in
-/// `root`. Registered plugins supply the namespaces and commands.
+/// The application supplies its name, version, and description.
+/// Namespaces and commands come from linked registrations.
 pub struct Cli {
     root: clap::Command,
 }
@@ -20,8 +20,10 @@ pub struct Cli {
 impl Cli {
     /// Creates a parser using the application's metadata and linked commands.
     #[must_use]
-    pub fn new(root: clap::Command) -> Self {
-        Self { root }
+    pub fn new(name: &'static str, version: &'static str, about: &'static str) -> Self {
+        Self {
+            root: clap::Command::new(name).version(version).about(about),
+        }
     }
 
     /// Checks the linked namespaces, commands, and clap argument definitions.

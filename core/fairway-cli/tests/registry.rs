@@ -53,8 +53,7 @@ fn parse(
     args: &[&str],
 ) -> Result<PreparedCommand, clap::Error> {
     let before = AUGMENTS.get();
-    let result =
-        Cli::new(clap::Command::new(name).version(version)).parse(args.iter().map(OsString::from));
+    let result = Cli::new(name, version, "Registry tests").parse(args.iter().map(OsString::from));
     assert_eq!(
         AUGMENTS.get(),
         before + 3,

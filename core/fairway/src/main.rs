@@ -18,10 +18,11 @@ fn main() -> ExitCode {
 }
 
 fn cli() -> Cli {
-    let root = clap::Command::new("fairway")
-        .version(env!("CARGO_PKG_VERSION"))
-        .about(env!("CARGO_PKG_DESCRIPTION"));
-    Cli::new(root)
+    Cli::new(
+        "fairway",
+        env!("CARGO_PKG_VERSION"),
+        env!("CARGO_PKG_DESCRIPTION"),
+    )
 }
 
 #[cfg(test)]

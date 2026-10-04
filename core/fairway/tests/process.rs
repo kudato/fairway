@@ -175,7 +175,7 @@ fn child_process() {
     }
     args.extend(argument.split_ascii_whitespace());
     let code = app::run(
-        Cli::new(clap::Command::new("fairway").version("1.0")),
+        Cli::new("fairway", "1.0", "Process tests"),
         args.into_iter().map(Into::into),
         Duration::from_millis(200),
         || {

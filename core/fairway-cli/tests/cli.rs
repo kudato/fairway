@@ -102,12 +102,12 @@ mod sibling {
     fairway_cli::command!(ALIAS, "upper", "Registered from another module", upper);
 }
 
-fn root() -> clap::Command {
-    clap::Command::new("fairway").version("1.0")
+fn cli() -> Cli {
+    Cli::new("fairway", "1.0", "CLI tests")
 }
 
 fn parse(args: &[&str]) -> Result<PreparedCommand, clap::Error> {
-    Cli::new(root()).parse(args.iter().map(OsString::from))
+    cli().parse(args.iter().map(OsString::from))
 }
 
 async fn run(args: &[&str]) -> anyhow::Result<()> {
@@ -175,7 +175,12 @@ async fn handler_uses_the_callers_runtime_and_returns_its_error() {
 
 #[test]
 fn help_uses_declarations_and_field_comments() {
-    Cli::new(root()).assert_valid();
+    cli().assert_valid();
+    let root = parse(&["fairway", "--help"])
+        .err()
+        .expect("expected help")
+        .to_string();
+    assert!(root.contains("CLI tests"), "{root}");
     let help = parse(&["fairway", "text", "repeat", "--help"])
         .err()
         .expect("expected help")
