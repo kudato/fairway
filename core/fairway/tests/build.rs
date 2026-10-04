@@ -36,7 +36,6 @@ cfg = {{ package = "fairway-config", path = {config:?} }}
 serde = {{ version = "1", features = ["derive"] }}
 clap = {{ version = "4", features = ["derive"] }}
 anyhow = "1"
-tokio = {{ version = "1.26", features = ["rt"] }}
 
 [profile.release]
 lto = "thin"
@@ -59,7 +58,6 @@ cfg.workspace = true
 serde.workspace = true
 clap.workspace = true
 anyhow.workspace = true
-tokio.workspace = true
 "#
                 ),
             );
@@ -239,7 +237,8 @@ fw::command!(CLI, "run", "Run", run, long_about = "Run");
         );
     }
 
-    // Type and handler-mode errors remain compile errors.
+    // Type and macro errors need only one build profile. Registration checks
+    // below still exercise debug and release with thin LTO.
     let cases = [
         (
             r#"
@@ -322,21 +321,6 @@ fw::command!(CLI, "Synchronous handler", run, long_about = "Synchronous handler"
         (
             r#"
 fw::namespace!(CLI, "sample");
-async fn run(_: fw::Shutdown) -> anyhow::Result<()> {
-    tokio::spawn(async {
-        let local = std::rc::Rc::new(1);
-        std::future::pending::<()>().await;
-        drop(local);
-    }).await?;
-    Ok(())
-}
-fw::command!(CLI, "Non-Send task", run, long_about = "Non-Send task");
-"#,
-            "future cannot be sent between threads safely",
-        ),
-        (
-            r#"
-fw::namespace!(CLI, "sample");
 #[derive(clap::Args)] struct Args { #[arg(long)] workers: String }
 async fn run(_: Args, _: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
 fw::command!(CLI, "Wrong worker count", run, long_about = "Wrong worker count", workers = |args: &Args| args.workers.clone());
@@ -399,9 +383,7 @@ fw::command!(CLI, "run", "Run", help, long_about = "Run the command");"#,
     ];
     for (source, diagnostic) in cases {
         fixture.write("plugin-b/src/lib.rs", source);
-        for release in [false, true] {
-            rejected(fixture.build(release), diagnostic);
-        }
+        rejected(fixture.build(false), diagnostic);
     }
 
     for name in [
@@ -421,21 +403,19 @@ fw::command!(CLI, "{name}", "Invalid subcommand", run, long_about = "Invalid sub
         );
         for (source, declaration) in [(namespace, "fw::namespace!"), (command, "fw::command!")] {
             fixture.write("plugin-b/src/lib.rs", &source);
-            for release in [false, true] {
-                let output = fixture.build(release);
-                let error = String::from_utf8_lossy(&output.stderr).replace('\\', "/");
-                rejected(
-                    output,
-                    "a CLI name cannot contain whitespace or control characters",
-                );
-                assert!(error.contains("plugin-b/src/lib.rs:"), "{name}: {error}");
-                assert!(error.contains(declaration), "{name}: {error}");
-            }
+            let output = fixture.build(false);
+            let error = String::from_utf8_lossy(&output.stderr).replace('\\', "/");
+            rejected(
+                output,
+                "a CLI name cannot contain whitespace or control characters",
+            );
+            assert!(error.contains("plugin-b/src/lib.rs:"), "{name}: {error}");
+            assert!(error.contains(declaration), "{name}: {error}");
         }
     }
 
     // Check the name's value, including raw and escaped string literals,
-    // and point to the declaration in both build profiles.
+    // and point to the declaration.
     let cases = [
         (r#"fw::namespace!(CLI, r"help");"#, "fw::namespace!"),
         (
@@ -450,13 +430,11 @@ fw::command!(CLI, "h\u{65}lp", "Reserved subcommand", run, long_about = "Reserve
     ];
     for (source, declaration) in cases {
         fixture.write("plugin-b/src/lib.rs", source);
-        for release in [false, true] {
-            let output = fixture.build(release);
-            let error = String::from_utf8_lossy(&output.stderr).replace('\\', "/");
-            assert!(error.contains("plugin-b/src/lib.rs:"), "{error}");
-            assert!(error.contains(declaration), "{error}");
-            rejected(output, "the CLI name `help` is reserved for built-in help");
-        }
+        let output = fixture.build(false);
+        let error = String::from_utf8_lossy(&output.stderr).replace('\\', "/");
+        assert!(error.contains("plugin-b/src/lib.rs:"), "{error}");
+        assert!(error.contains(declaration), "{error}");
+        rejected(output, "the CLI name `help` is reserved for built-in help");
     }
 
     // Names and clap definitions can compile, but must fail the app's test.

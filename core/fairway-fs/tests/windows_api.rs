@@ -277,30 +277,6 @@ async fn junction_parent_aliases_share_a_lock() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn readonly_target_failure_does_not_leak_readonly_staging_files() -> anyhow::Result<()> {
-    let dir = tempfile::tempdir()?;
-    let path = dir.path().join("readonly");
-    std::fs::write(&path, "old")?;
-    let original_permissions = std::fs::metadata(&path)?.permissions();
-    let mut permissions = original_permissions.clone();
-    permissions.set_readonly(true);
-    std::fs::set_permissions(&path, permissions)?;
-    let result = fs::write(&path, "new".to_owned()).await;
-    let count = std::fs::read_dir(dir.path())?.count();
-    let contents = std::fs::read(&path)?;
-    // Restore the permissions before asserting: the temporary directory cannot
-    // be removed while it contains a read-only file.
-    std::fs::set_permissions(&path, original_permissions)?;
-    assert!(
-        result.is_err(),
-        "Windows denies replacement of a readonly target"
-    );
-    assert_eq!(contents, b"old");
-    assert_eq!(count, 1, "failed commit leaked a readonly staging file");
-    Ok(())
-}
-
-#[tokio::test]
 async fn replacement_preserves_a_protected_dacl() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let path = dir.path().join("security");

@@ -1018,13 +1018,17 @@ mod unix {
 
     #[cfg(target_os = "macos")]
     #[tokio::test]
+    #[ignore = "requires a volume that rounds creation times; set FAIRWAY_TEST_ROUNDING_VOLUME"]
     async fn macos_writes_and_edits_accept_creation_time_rounding() -> anyhow::Result<()> {
         use std::{
             fs::{File, FileTimes},
             os::macos::fs::FileTimesExt,
         };
 
-        let directory = tempfile::tempdir()?;
+        let volume = std::env::var_os("FAIRWAY_TEST_ROUNDING_VOLUME").expect(
+            "set FAIRWAY_TEST_ROUNDING_VOLUME to a mounted volume that rounds creation times",
+        );
+        let directory = tempfile::tempdir_in(volume)?;
         let reference = File::create(directory.path().join("reference"))?;
         for editing in [false, true] {
             let path = directory
@@ -1036,6 +1040,10 @@ mod unix {
             let created = std::fs::metadata(&path)?.created()?;
             reference.set_times(FileTimes::new().set_created(created))?;
             let expected = reference.metadata()?.created()?;
+            assert_ne!(
+                expected, created,
+                "the selected volume did not round the creation time; this scenario was not exercised"
+            );
 
             if editing {
                 fs::edit(&path, |text: String| async move {

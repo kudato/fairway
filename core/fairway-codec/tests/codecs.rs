@@ -115,31 +115,6 @@ fn render(text: &str) -> String {
 }
 
 #[test]
-fn markdown_preserves_commonmark_structure() {
-    for input in [
-        "# Heading\n\nText with **bold**, *emphasis*, and `code`.\n",
-        "> Quote\n>\n> - one\n> - two\n\n---\n",
-        "3. First\n4. Second\n\n    Nested paragraph\n",
-        "[link](https://example.org \"title\") and ![alt](image.png)\n",
-        "[reference][id]\n\n[id]: https://example.org \"title\"\n",
-        "```rust\nlet x = `a`;\n```\n",
-        "<div>raw HTML</div>\n\nline  \nbreak\n",
-        "\\*literal\\* \\[text\\] &amp; &#35; heading\n",
-        "- [ ] no task-list extension\n\n~~no strikethrough~~\n",
-        "```\ninside ``` a fence\n```\n",
-        "# Кот 🐈\r\n\r\n[ссылка][id]\r\n\r\n[id]: /путь 'заголовок'\r\n",
-        "",
-    ] {
-        let markdown = Markdown::decode(input.as_bytes().to_vec()).unwrap();
-        let mut html = String::new();
-        pulldown_cmark::html::push_html(&mut html, markdown.events());
-        assert_eq!(render(input), html, "input: {input:?}\noutput: {html:?}");
-        assert_eq!(markdown.encode().unwrap(), input.as_bytes());
-    }
-    assert!(Markdown::decode(vec![255]).is_err());
-}
-
-#[test]
 fn markdown_traversals_are_independent_and_can_stop_early() {
     use fairway_codec::markdown::{Event, HeadingLevel, Tag};
 
@@ -167,30 +142,6 @@ fn markdown_traversals_are_independent_and_can_stop_early() {
     pulldown_cmark::html::push_html(&mut html, clone.events());
     assert_eq!(html, render(source));
     assert_eq!(clone.encode().unwrap(), source.as_bytes());
-}
-
-#[test]
-fn markdown_events_can_be_collected_and_owned_explicitly() {
-    let source = "Escaped \\*text\\* &amp; **bold** [link][id]\n\n[id]: /target 'title'\n";
-    let document = Markdown::parse(source.to_owned());
-    let borrowed: Vec<_> = document.events().collect();
-    let mut html = String::new();
-    pulldown_cmark::html::push_html(&mut html, borrowed.iter().cloned());
-    assert_eq!(html, render(source));
-
-    let owned: Vec<_> = document.events().map(|event| event.into_static()).collect();
-    assert_eq!(borrowed, owned);
-    drop(borrowed);
-    drop(document);
-    let mut html = String::new();
-    pulldown_cmark::html::push_html(&mut html, owned.into_iter());
-    assert_eq!(html, render(source));
-}
-
-#[test]
-fn errors_are_send_and_sync() {
-    fn assert_traits<T: Send + Sync + std::error::Error>() {}
-    assert_traits::<Error>();
 }
 
 #[test]

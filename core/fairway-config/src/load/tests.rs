@@ -474,36 +474,75 @@ async fn links_allow_external_sources_and_aliases_but_reject_cycles() {
 }
 
 #[cfg(unix)]
-#[tokio::test]
-async fn dangling_selected_links_and_fifos_fail_without_waiting() {
-    use std::os::unix::fs::symlink;
+#[test]
+fn dangling_selected_links_and_fifos_fail_without_waiting() {
+    use std::{
+        os::unix::fs::symlink,
+        process::{Command, Stdio},
+        time::{Duration, Instant},
+    };
+
+    if let Some(home) = std::env::var_os("FAIRWAY_CONFIG_TEST_NON_REGULAR_HOME") {
+        let expected = std::env::var("FAIRWAY_CONFIG_TEST_NON_REGULAR_ERROR").unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let error = runtime.block_on(table(Path::new(&home))).unwrap_err();
+        let message = diagnostic(&error);
+        assert!(message.contains(&expected), "{message}");
+        return;
+    }
+
+    // A timeout around the future cannot stop an OS-open blocked on a FIFO.
+    // Isolate both loading routes so the parent can kill even a stuck runtime.
+    let reject = |home: &Path, expected: &str| {
+        let module = module_path!().split_once("::").unwrap().1;
+        let test = format!("{module}::dangling_selected_links_and_fifos_fail_without_waiting");
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &test, "--nocapture"])
+            .env("FAIRWAY_CONFIG_TEST_NON_REGULAR_HOME", home)
+            .env("FAIRWAY_CONFIG_TEST_NON_REGULAR_ERROR", expected)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let start = Instant::now();
+        while child.try_wait().unwrap().is_none() {
+            if start.elapsed() > Duration::from_secs(5) {
+                child.kill().unwrap();
+                let output = child.wait_with_output().unwrap();
+                panic!("loading {home:?} timed out: {output:?}");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let output = child.wait_with_output().unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success() && stdout.contains("1 passed;"),
+            "loading {home:?}:\n{stdout}\n{stderr}"
+        );
+    };
+
     let home = TempDir::new().unwrap();
     fs::create_dir(home.path().join("conf.d")).unwrap();
     let path = home.path().join("conf.d/broken.toml");
     symlink(home.path().join("missing"), &path).unwrap();
-    assert!(
-        table(home.path())
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("broken.toml")
-    );
+    reject(home.path(), "broken.toml");
     fs::remove_file(&path).unwrap();
     // The main path exercises descriptor validation; the extra path exercises traversal.
     for relative in ["config.toml", "conf.d/pipe.toml"] {
         let path = home.path().join(relative);
         assert!(
-            std::process::Command::new("mkfifo")
+            Command::new("mkfifo")
                 .arg(&path)
                 .status()
                 .unwrap()
                 .success()
         );
-        let error = tokio::time::timeout(std::time::Duration::from_secs(3), table(home.path()))
-            .await
-            .unwrap()
-            .unwrap_err();
-        assert!(diagnostic(&error).contains("regular file"));
+        reject(home.path(), "regular file");
         fs::remove_file(path).unwrap();
     }
 }

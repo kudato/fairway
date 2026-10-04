@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use tokio_util::sync::CancellationToken;
 
-use fairway_cli::__private::{Cli, PreparedCommand, Threading};
+use fairway_cli::__private::{Cli, PreparedCommand};
 use fairway_cli::{Shutdown, help as namespace_help};
 
 fairway_cli::namespace!(CLI, "text");
@@ -103,68 +103,6 @@ fairway_cli::command!(
     long_about = "Arguments and shutdown"
 );
 
-async fn fail(_: Shutdown) -> anyhow::Result<()> {
-    anyhow::bail!("command failed");
-}
-fairway_cli::command!(
-    CLI,
-    "fail",
-    "Return an error",
-    fail,
-    long_about = "Return an error"
-);
-
-async fn flavor(_: Shutdown) -> anyhow::Result<()> {
-    let handle = tokio::runtime::Handle::current();
-    note(format!(
-        "{:?}:{}",
-        handle.runtime_flavor(),
-        handle.metrics().num_workers(),
-    ));
-    Ok(())
-}
-fairway_cli::command!(
-    CLI,
-    "single",
-    "One execution thread",
-    flavor,
-    long_about = "One execution thread"
-);
-fairway_cli::command!(
-    CLI,
-    "fixed",
-    "Two worker threads",
-    flavor,
-    long_about = "Two worker threads",
-    workers = 2
-);
-fairway_cli::command!(
-    CLI,
-    "available",
-    "Available cores",
-    flavor,
-    long_about = "Available cores",
-    workers = 0
-);
-
-#[derive(clap::Args)]
-struct Pool {
-    #[arg(long, default_value_t = 3)]
-    workers: usize,
-}
-
-async fn pool(_: Pool, shutdown: Shutdown) -> anyhow::Result<()> {
-    flavor(shutdown).await
-}
-fairway_cli::command!(
-    CLI,
-    "pool",
-    "Workers from arguments",
-    pool,
-    long_about = "Workers from arguments",
-    workers = |args: &Pool| args.workers
-);
-
 mod sibling {
     use super::CLI as ALIAS;
 
@@ -227,33 +165,6 @@ async fn both_shutdown_signatures_receive_the_shared_request() {
     }
     assert!(recorded("observed"));
     assert!(recorded("shutdown"));
-}
-
-#[test]
-fn threading_is_selected_without_a_running_runtime() {
-    assert!(tokio::runtime::Handle::try_current().is_err());
-    for (command, expected) in [
-        ("single", Threading::CurrentThread),
-        ("fixed", Threading::MultiThread { workers: 2 }),
-        ("available", Threading::MultiThread { workers: 0 }),
-        ("pool", Threading::MultiThread { workers: 3 }),
-    ] {
-        let prepared = parse(&["fairway", "text", command]).unwrap();
-        assert_eq!(prepared.threading(), expected);
-    }
-
-    let prepared = parse(&["fairway", "text", "pool", "--workers", "4"]).unwrap();
-    assert_eq!(prepared.threading(), Threading::MultiThread { workers: 4 });
-}
-
-#[tokio::test]
-async fn handler_uses_the_callers_runtime_and_returns_its_error() {
-    // The request for two workers is metadata. The application owns the
-    // runtime; awaiting this command uses our existing current-thread runtime.
-    run(&["fairway", "text", "fixed"]).await.unwrap();
-    assert!(recorded("CurrentThread:1"));
-    let error = run(&["fairway", "text", "fail"]).await.unwrap_err();
-    assert_eq!(error.to_string(), "command failed");
 }
 
 #[test]

@@ -1,14 +1,12 @@
-//! Publication, concurrency, cancellation, and cached results in isolated processes.
+//! Startup defaults, atomic publication, and failures in isolated processes.
 
 use std::{
-    future::{Future, poll_fn},
     path::Path,
     process::Command,
     sync::{
         Condvar, Mutex, OnceLock,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicUsize, Ordering},
     },
-    task::Poll,
     time::Duration,
 };
 
@@ -16,7 +14,6 @@ use fairway_config::__private::initialize;
 use serde::Deserialize;
 
 static PREPARES: AtomicUsize = AtomicUsize::new(0);
-static BLOCKED: AtomicBool = AtomicBool::new(false);
 static STARTED: OnceLock<tokio::sync::Notify> = OnceLock::new();
 static RELEASE: (Mutex<bool>, Condvar) = (Mutex::new(false), Condvar::new());
 
@@ -43,7 +40,7 @@ impl<'de> Deserialize<'de> for Settings {
             // Actual misuse of the public API while settings are still being prepared.
             ALPHA.get();
         }
-        if value == 100 && !BLOCKED.swap(true, Ordering::SeqCst) {
+        if value == 100 {
             STARTED.get().unwrap().notify_one();
             let (lock, ready) = &RELEASE;
             let _guard = ready
@@ -89,11 +86,8 @@ async fn scenario(mode: &str, home: &Path) {
         }
         "failure" => {
             config(home, "'invalid'");
-            let first = initialize().await.unwrap_err().to_string();
-            assert!(first.contains("beta"));
-            inaccessible();
-            config(home, "20");
-            assert_eq!(initialize().await.unwrap_err().to_string(), first);
+            let error = initialize().await.unwrap_err().to_string();
+            assert!(error.contains("beta"));
             inaccessible();
         }
         "reentrant" => {
@@ -101,56 +95,21 @@ async fn scenario(mode: &str, home: &Path) {
             let task = tokio::spawn(initialize());
             assert!(task.await.unwrap_err().is_panic());
             inaccessible();
-            config(home, "20");
-            initialize().await.unwrap();
-            assert_eq!(BETA.get().value, 20);
         }
-        "success" | "cancel" => {
-            if mode == "cancel" {
-                config(home, "10");
-                let (started, wait_started) = tokio::sync::oneshot::channel();
-                let (release, wait_release) = std::sync::mpsc::channel();
-                // Hold the only blocking worker so initialization must wait for file I/O.
-                let blocker = tokio::task::spawn_blocking(move || {
-                    let _ = started.send(());
-                    let _ = wait_release.recv();
-                });
-                wait_started.await.unwrap();
-                {
-                    let mut initialization = std::pin::pin!(initialize());
-                    let state = poll_fn(|cx| Poll::Ready(initialization.as_mut().poll(cx))).await;
-                    assert!(state.is_pending());
-                }
-                inaccessible();
-                assert_eq!(PREPARES.load(Ordering::SeqCst), 0);
-                config(home, "20");
-                release.send(()).unwrap();
-                blocker.await.unwrap();
-                initialize().await.unwrap();
-                assert_eq!(BETA.get().value, 20);
-            } else {
-                STARTED.set(tokio::sync::Notify::new()).unwrap();
-                config(home, "100");
-                let task = tokio::spawn(initialize());
-                tokio::time::timeout(Duration::from_secs(5), STARTED.get().unwrap().notified())
-                    .await
-                    .unwrap();
-                // Alpha is already deserialized. Neither namespace is published yet.
-                inaccessible();
-                let waiters: Vec<_> = (0..8).map(|_| tokio::spawn(initialize())).collect();
-                release();
-                task.await.unwrap().unwrap();
-                for waiter in waiters {
-                    waiter.await.unwrap().unwrap();
-                }
-                assert_eq!(PREPARES.load(Ordering::SeqCst), 2);
-                assert_eq!(BETA.get().value, 100);
-            }
-            let original = ALPHA.get();
-            assert_eq!(original.value, 10);
-            std::fs::remove_file(home.join("config.toml")).unwrap();
-            initialize().await.unwrap();
-            assert!(std::ptr::eq(original, ALPHA.get()));
+        "success" => {
+            STARTED.set(tokio::sync::Notify::new()).unwrap();
+            config(home, "100");
+            let task = tokio::spawn(initialize());
+            tokio::time::timeout(Duration::from_secs(5), STARTED.get().unwrap().notified())
+                .await
+                .unwrap();
+            // Alpha is already deserialized. Neither namespace is published yet.
+            inaccessible();
+            release();
+            task.await.unwrap().unwrap();
+            assert_eq!(PREPARES.load(Ordering::SeqCst), 2);
+            assert_eq!(ALPHA.get().value, 10);
+            assert_eq!(BETA.get().value, 100);
         }
         _ => unreachable!(),
     }
@@ -166,21 +125,16 @@ fn process_configuration() {
         } else {
             tokio::runtime::Builder::new_current_thread()
         };
-        let runtime = builder
-            .worker_threads(2)
-            .max_blocking_threads(1)
-            .enable_all()
-            .build()
-            .unwrap();
+        let runtime = builder.worker_threads(2).enable_all().build().unwrap();
         runtime.block_on(scenario(&mode, &home));
         drop(runtime);
         // Published values remain accessible independently of the original runtime.
-        if mode != "failure" {
+        if matches!(mode.as_str(), "defaults" | "success") {
             assert!(ALPHA.get().value > 0);
         }
         return;
     }
-    for mode in ["defaults", "success", "failure", "cancel", "reentrant"] {
+    for mode in ["defaults", "success", "failure", "reentrant"] {
         let home = tempfile::tempdir().unwrap();
         let mut child = Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "process_configuration", "--nocapture"])

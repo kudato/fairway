@@ -115,6 +115,14 @@ axum = {{ version = "0.8", default-features = false, features = ["http1", "tokio
         let binary = target
             .join("debug")
             .join(format!("fairway{}", std::env::consts::EXE_SUFFIX));
+        // Clap includes .exe in Windows usage lines. Derive the transcript
+        // from the current guide, allowing only this platform suffix.
+        let transcript = directory.path().join(format!("cli-{language}.md"));
+        fs::write(
+            &transcript,
+            markdown.replace("\nUsage: fairway ", "\nUsage: fairway[EXE] "),
+        )
+        .unwrap();
         trycmd::TestCases::new()
             .env(
                 "FAIRWAY_HOME",
@@ -122,7 +130,7 @@ axum = {{ version = "0.8", default-features = false, features = ["http1", "tokio
             )
             .register_bin("fairway", binary)
             .timeout(Duration::from_secs(10))
-            .case(&guide)
+            .case(&transcript)
             .run();
     }
 }

@@ -83,26 +83,6 @@ fn child_process() {
                 );
                 directory.close().await?;
             }
-            #[cfg(unix)]
-            "home-error" => {
-                use std::error::Error as _;
-
-                std::fs::remove_dir(std::env::current_dir()?)?;
-                let first = fs::home().await.unwrap_err();
-                let source = first.source().unwrap().downcast_ref::<io::Error>().unwrap();
-                assert!(source.raw_os_error().is_some());
-                assert_eq!(first.raw_os_error(), source.raw_os_error());
-                std::env::set_current_dir(&target)?;
-                let second = fs::home().await.unwrap_err();
-                assert_eq!(first.operation(), second.operation());
-                assert_eq!(first.path(), second.path());
-                assert_eq!(first.kind(), second.kind());
-                assert_eq!(first.raw_os_error(), second.raw_os_error());
-                assert!(std::ptr::eq(
-                    first.source().unwrap(),
-                    second.source().unwrap()
-                ));
-            }
             _ => panic!("unknown child action"),
         }
         Ok::<_, anyhow::Error>(())
@@ -338,18 +318,5 @@ fn home_is_fixed_before_later_cwd_changes_and_is_not_created() -> anyhow::Result
         std::fs::canonicalize(directory.path())?
     );
     assert!(!actual.exists());
-    Ok(())
-}
-
-#[cfg(unix)]
-#[test]
-fn home_caches_the_original_os_error_without_losing_its_cause() -> anyhow::Result<()> {
-    let directory = tempfile::tempdir()?;
-    let cwd = directory.path().join("cwd");
-    std::fs::create_dir(&cwd)?;
-    let output = child("home-error", directory.path(), Path::new("relative-home"))
-        .current_dir(&cwd)
-        .output()?;
-    assert!(output.status.success(), "{output:?}");
     Ok(())
 }

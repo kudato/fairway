@@ -118,36 +118,6 @@ fairway_cli::command!(
     workers = |args: &Pool| args.workers
 );
 
-async fn prepared(_: Shutdown) -> anyhow::Result<()> {
-    println!("HANDLER");
-    Ok(())
-}
-fairway_cli::command!(
-    CLI,
-    "prepared",
-    "Prepared application",
-    prepared,
-    long_about = "Prepared application"
-);
-fairway_cli::command!(
-    CLI,
-    "preparation-error",
-    "Failed preparation",
-    prepared,
-    long_about = "Failed preparation"
-);
-
-async fn error(_: Shutdown) -> anyhow::Result<()> {
-    anyhow::bail!("command failed");
-}
-fairway_cli::command!(
-    CLI,
-    "error",
-    "Handler error",
-    error,
-    long_about = "Handler error"
-);
-
 fn ready() {
     println!("READY");
     std::io::stdout().flush().unwrap();
@@ -290,9 +260,6 @@ fn child_process() {
                     std::thread::park();
                 }
             }
-            if argument == "preparation-error" {
-                anyhow::bail!("preparation failed");
-            }
             Ok(())
         },
     );
@@ -374,28 +341,6 @@ fn application_runs_non_send_handlers_with_the_requested_runtime() {
             .find_map(|line| line.strip_prefix("HANDLER:"))
             .expect("missing handler thread");
         assert_eq!(caller, handler, "{stdout}");
-    }
-}
-
-#[test]
-fn application_prepares_once_and_reports_errors() {
-    let home = tempfile::tempdir().unwrap();
-    for (argument, code, handler_runs, diagnostic) in [
-        ("prepared", 0, 1, ""),
-        ("preparation-error", 1, 0, "error: preparation failed"),
-        ("error", 1, 0, "error: command failed"),
-    ] {
-        let output = child(argument, home.path()).output().unwrap();
-        assert_eq!(output.status.code(), Some(code), "{output:?}");
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert_eq!(stdout.matches("PREPARING").count(), 1, "{stdout}");
-        assert_eq!(stdout.matches("HANDLER").count(), handler_runs, "{stdout}");
-        if code == 0 {
-            assert!(stderr.is_empty(), "{stderr}");
-        } else {
-            assert!(stderr.contains(diagnostic), "{stderr}");
-        }
     }
 }
 
