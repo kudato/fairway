@@ -133,14 +133,17 @@ fn tree(root: clap::Command, groups: &[Group<'_>]) -> clap::Command {
                 .subcommand_required(true)
                 .arg_required_else_help(true);
         }
-        if group.own.is_none_or(|own| own.is_help) {
-            for (name, command) in &group.named {
-                namespace = namespace.subcommand(
-                    (command.augment)(clap::Command::new(*name))
-                        .about(command.about)
-                        .long_about(command.long_about),
-                );
-            }
+        if namespace.get_arguments().next().is_some() {
+            namespace = namespace
+                .subcommand_negates_reqs(true)
+                .args_conflicts_with_subcommands(true);
+        }
+        for (name, command) in &group.named {
+            namespace = namespace.subcommand(
+                (command.augment)(clap::Command::new(*name))
+                    .about(command.about)
+                    .long_about(command.long_about),
+            );
         }
         root = root.subcommand(namespace);
     }
@@ -155,12 +158,9 @@ fn selected<'a>(
     let group = &groups[groups
         .binary_search_by_key(&namespace.as_str(), |group| group.namespace.name)
         .ok()?];
-    if let Some(own) = group.own
-        && (!own.is_help || below.subcommand_name().is_none())
-    {
-        return Some((own, below));
-    }
-    let (name, arguments) = below.remove_subcommand()?;
+    let Some((name, arguments)) = below.remove_subcommand() else {
+        return Some((group.own?, below));
+    };
     let index = group
         .named
         .binary_search_by_key(&name.as_str(), |(declared, _)| *declared)

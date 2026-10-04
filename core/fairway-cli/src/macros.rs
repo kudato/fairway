@@ -4,7 +4,7 @@
 ///
 /// Namespace names must be unique across the linked application.
 /// Register the namespace's descriptions and action with [`command!`](crate::command).
-/// Use [`help`](crate::help) for a namespace containing subcommands.
+/// Use [`help`](crate::help) to display help when no subcommand is selected.
 /// The application's registry test checks unique names and missing commands.
 /// The name `help` is reserved for built-in help and is a compile error.
 ///
@@ -48,10 +48,13 @@ macro_rules! namespace {
 /// Both descriptions are required: `about` is used in command lists and `-h`,
 /// and `long_about` in `--help`. They override descriptions on the argument type.
 ///
-/// Register [`help`](crate::help) as the namespace's action to allow subcommands.
-/// Invoking that namespace prints its full help and exits with code 0.
-/// A regular namespace handler cannot coexist with subcommands.
-/// Missing namespace registrations and incompatible actions are compile errors.
+/// A namespace can have both its own handler and named subcommands.
+/// Without a subcommand, Fairway runs the namespace's handler. Register
+/// [`help`](crate::help) instead to print full help and exit with code 0.
+/// Arguments for the namespace's handler cannot be combined with a subcommand;
+/// its required arguments do not apply when a subcommand is selected.
+/// Subcommands without a namespace action, or duplicate namespace actions,
+/// are compile errors.
 /// Duplicate subcommand names are checked by the application's registry test.
 /// The subcommand name `help` is reserved for built-in help and is a compile error.
 ///
@@ -92,10 +95,7 @@ macro_rules! namespace {
 macro_rules! command {
     ($ns:ident, $name:literal, $about:literal, $run:path, long_about = $long_about:literal $(, workers = $workers:expr)? $(,)?) => {
         const _: () = {
-            assert!(
-                <$ns::Key as $crate::__private::NamespaceCommand>::IS_HELP,
-                "a namespace with subcommands must use fairway_cli::help",
-            );
+            let () = <$ns::Key as $crate::__private::NamespaceCommand>::REGISTERED;
             assert!(
                 !$crate::__private::is_help(&$run),
                 "fairway_cli::help can only handle a namespace",
@@ -106,7 +106,7 @@ macro_rules! command {
     ($ns:ident, $about:literal, $run:path, long_about = $long_about:literal $(, workers = $workers:expr)? $(,)?) => {
         const _: () = {
             impl $crate::__private::NamespaceCommand for $ns::Key {
-                const IS_HELP: bool = $crate::__private::is_help(&$run);
+                const REGISTERED: () = ();
             }
             $crate::__declare!($ns, ::core::option::Option::None, $about, $long_about, $run $(, $workers)?);
         };
@@ -134,7 +134,6 @@ macro_rules! __declare {
             &$ns,
             $name,
             ($about, $long_about),
-            $crate::__private::is_help(&$run),
             augment,
             prepare,
             ::core::concat!(::core::module_path!(), " (", ::core::file!(), ":", ::core::line!(), ")"),

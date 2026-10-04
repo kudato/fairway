@@ -193,6 +193,7 @@ fn plugins_register_and_application_tests_reject_conflicts() {
 fw::namespace!(CLI, "shared");
 async fn run(_: fw::Shutdown) -> anyhow::Result<()> { panic!("validation must not run handlers") }
 fw::command!(CLI, "First plugin", run, long_about = "First plugin");
+fw::command!(CLI, "run", "Run", run, long_about = "Run");
 "#;
     let b = r#"#![deny(warnings)]
 fw::namespace!(CLI, "second");
@@ -224,6 +225,84 @@ fw::command!(CLI, "run", "Run", run, long_about = "Run");
 
     fixture.write(
         "plugin-b/src/lib.rs",
+        r#"#![deny(warnings)]
+fw::namespace!(CLI, "sample");
+#[derive(clap::Args)]
+struct Own {
+    value: String,
+    #[arg(long)] port: u16,
+    #[arg(long, default_value_t = 2)] workers: usize,
+}
+#[derive(clap::Args)]
+struct Status {
+    #[arg(long)] format: String,
+    #[arg(long, default_value_t = 3)] workers: usize,
+}
+async fn help(args: Own, _: fw::Shutdown) -> anyhow::Result<()> {
+    println!("OWN:{}:{}", args.value, args.port);
+    Ok(())
+}
+async fn status(args: Status, _: fw::Shutdown) -> anyhow::Result<()> {
+    println!("STATUS:{}", args.format);
+    Ok(())
+}
+fw::command!(CLI, "status", "Status", status, long_about = "Show status.", workers = |args: &Status| {
+    println!("STATUS_WORKERS:{}", args.workers);
+    args.workers
+});
+fw::command!(CLI, "Sample", help, long_about = "Run the sample.", workers = |args: &Own| {
+    println!("OWN_WORKERS:{}", args.workers);
+    args.workers
+});
+"#,
+    );
+    successful(fixture.build(false));
+    successful(fixture.check(false));
+    for (args, expected) in [
+        (
+            vec!["sample", "value", "--port", "8080"],
+            "OWN_WORKERS:2\nOWN:value:8080\n",
+        ),
+        (
+            vec!["sample", "status", "--format", "short", "--workers", "4"],
+            "STATUS_WORKERS:4\nSTATUS:short\n",
+        ),
+        (
+            vec!["sample", "--port", "8080", "--", "status"],
+            "OWN_WORKERS:2\nOWN:status:8080\n",
+        ),
+    ] {
+        let output = fixture.run(&args);
+        assert_eq!(output.status.code(), Some(0), "{args:?}: {output:?}");
+        assert!(output.stderr.is_empty(), "{args:?}: {output:?}");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
+    }
+    for (args, expected, absent) in [
+        (vec!["sample", "--help"], "--port", "--format"),
+        (vec!["sample", "status", "--help"], "--format", "--port"),
+    ] {
+        let output = fixture.run(&args);
+        assert_eq!(output.status.code(), Some(0), "{args:?}: {output:?}");
+        let help = String::from_utf8_lossy(&output.stdout);
+        assert!(help.contains("status"), "{help}");
+        assert!(help.contains(expected), "{help}");
+        assert!(!help.contains(absent), "{help}");
+        assert!(!help.contains("WORKERS:"), "{help}");
+    }
+    for args in [
+        vec!["sample"],
+        vec!["sample", "value"],
+        vec!["sample", "status"],
+        vec!["sample", "--port", "8080", "status", "--format", "short"],
+        vec!["sample", "status", "--format", "short", "--port", "8080"],
+    ] {
+        let output = fixture.run(&args);
+        assert_eq!(output.status.code(), Some(2), "{args:?}: {output:?}");
+        assert!(output.stdout.is_empty(), "{args:?}: {output:?}");
+    }
+
+    fixture.write(
+        "plugin-b/src/lib.rs",
         "#![deny(warnings)]\nfw::namespace!(CLI, \"empty\");\n",
     );
     for release in [false, true] {
@@ -240,24 +319,6 @@ fw::command!(CLI, "run", "Run", run, long_about = "Run");
     // Type and macro errors need only one build profile. Registration checks
     // below still exercise debug and release with thin LTO.
     let cases = [
-        (
-            r#"
-fw::namespace!(CLI, "sample");
-async fn run(_: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
-fw::command!(CLI, "Own", run, long_about = "Own");
-fw::command!(CLI, "named", "Named", run, long_about = "Named");
-"#,
-            "a namespace with subcommands must use fairway_cli::help",
-        ),
-        (
-            r#"
-fw::namespace!(CLI, "sample");
-async fn run(_: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
-fw::command!(CLI, "named", "Named", run, long_about = "Named");
-fw::command!(CLI, "Own", run, long_about = "Own");
-"#,
-            "a namespace with subcommands must use fairway_cli::help",
-        ),
         (
             r#"
 fw::namespace!(CLI, "sample");
@@ -372,13 +433,6 @@ fw::command!(CLI, "Sample", fw::help, long_about = "Sample commands", workers = 
 fw::command!(CLI, "Sample", fw::help, long_about = "Sample commands");
 fw::command!(CLI, "nested", "Nested", fw::help, long_about = "Nested commands");"#,
             "fairway_cli::help can only handle a namespace",
-        ),
-        (
-            r#"fw::namespace!(CLI, "sample");
-async fn help(_: fw::Shutdown) -> anyhow::Result<()> { Ok(()) }
-fw::command!(CLI, "Sample", help, long_about = "An ordinary handler named help");
-fw::command!(CLI, "run", "Run", help, long_about = "Run the command");"#,
-            "a namespace with subcommands must use fairway_cli::help",
         ),
     ];
     for (source, diagnostic) in cases {

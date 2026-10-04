@@ -4,8 +4,8 @@ use crate::handler::Action;
 
 /// A namespace declared by [`namespace!`](crate::namespace).
 ///
-/// Its CLI name is shared by its subcommands, or used directly when
-/// the namespace has its own handler. The Rust static belongs to the
+/// Its CLI name is shared by its subcommands and used directly to invoke
+/// the namespace's own action. The Rust static belongs to the
 /// declaring crate.
 pub struct Namespace {
     pub(crate) name: &'static str,
@@ -54,7 +54,7 @@ const fn valid_name(name: &str) {
 
 #[doc(hidden)]
 pub trait NamespaceCommand {
-    const IS_HELP: bool;
+    const REGISTERED: ();
 }
 
 #[doc(hidden)]
@@ -63,7 +63,6 @@ pub struct Command {
     pub(crate) name: Option<&'static str>,
     pub(crate) about: &'static str,
     pub(crate) long_about: &'static str,
-    pub(crate) is_help: bool,
     pub(crate) augment: fn(clap::Command) -> clap::Command,
     pub(crate) prepare: fn(&mut clap::ArgMatches) -> Result<Action, clap::Error>,
     source: &'static str,
@@ -75,7 +74,6 @@ impl Command {
         namespace: &'static Namespace,
         name: Option<&'static str>,
         descriptions: (&'static str, &'static str),
-        is_help: bool,
         augment: fn(clap::Command) -> clap::Command,
         prepare: fn(&mut clap::ArgMatches) -> Result<Action, clap::Error>,
         source: &'static str,
@@ -88,7 +86,6 @@ impl Command {
             name,
             about: descriptions.0,
             long_about: descriptions.1,
-            is_help,
             augment,
             prepare,
             source,
@@ -144,17 +141,11 @@ pub(crate) fn assert_valid() {
                 );
             }
         }
-        let own = commands
-            .first()
-            .filter(|command| command.name.is_none())
-            .expect("each namespace must register its own handler or fairway_cli::help");
-        if !own.is_help
-            && let Some(named) = commands.iter().find(|command| command.name.is_some())
-        {
-            panic!(
-                "namespace {:?} mixes its own handler and subcommands:\n  {}\n  {}",
-                namespace.name, own.source, named.source,
-            );
-        }
+        assert!(
+            commands
+                .first()
+                .is_some_and(|command| command.name.is_none()),
+            "each namespace must register its own handler or fairway_cli::help",
+        );
     }
 }

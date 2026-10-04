@@ -47,7 +47,8 @@ To register a subcommand, add its name to `command!`:
 `command!(CLI, "name", "about", handler, long_about = "details")` registers the invocation
 `fairway <namespace> <name>`.
 
-Register `fairway_cli::help` for the namespace itself, as in the example below.
+To display help when the namespace itself is invoked, register
+`fairway_cli::help`, as in the example below.
 
 CLI arguments are described by a type implementing `clap::Args`;
 the handler receives a value of that type.
@@ -126,6 +127,20 @@ hello
 
 ```
 
+### Own handler and subcommands
+
+A namespace can have both its own handler and subcommands.
+Without a subcommand, Fairway calls the namespace's handler;
+otherwise, it calls the selected subcommand's handler.
+
+For example, replace `fairway_cli::help` with `repeat` in the `text`
+namespace registration above. Then `fairway text hello` calls `repeat`,
+and `fairway text upper hello` calls `upper`.
+
+Arguments and `workers` belong to the selected handler.
+Required namespace arguments do not apply to a subcommand.
+Arguments for the namespace's own handler cannot be combined with a subcommand.
+
 ## Threads and shutdown
 
 `Shutdown` is passed as the handler's last parameter.
@@ -203,13 +218,13 @@ $ fairway http serve --listen 127.0.0.1:9000 --workers 4
 
 Namespace names are unique across the application; command names are unique within a namespace.
 A namespace registers a regular handler or `fairway_cli::help`.
-The latter permits subcommands; invoking the namespace itself displays
-full help and exits with code 0.
+Both permit subcommands. When invoked without a subcommand,
+`fairway_cli::help` displays full help and exits with code 0.
 The application test checks for namespaces without commands and duplicate
 names: `cargo test -p fairway`.
 The check covers the plugins and Cargo features included in that build;
-`cargo build` does not run it. Mixing a regular namespace handler with subcommands
-or registering a second namespace action causes a compilation error.
+`cargo build` does not run it. Registering a second namespace action
+causes a compilation error.
 Names must be nonempty and contain no whitespace or control characters.
 
 The name `help` is reserved for built-in help. A namespace or subcommand
