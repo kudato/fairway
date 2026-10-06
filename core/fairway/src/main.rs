@@ -9,27 +9,29 @@ mod signal;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use fairway_cli::__private::Cli;
+use fairway_cli::__private::parse;
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
 
 fn main() -> ExitCode {
-    app::run(cli(), std::env::args_os(), SHUTDOWN_TIMEOUT, || Ok(()))
-}
-
-fn cli() -> Cli {
-    Cli::new(
+    let command = parse(
         "fairway",
         env!("CARGO_PKG_VERSION"),
         env!("CARGO_PKG_DESCRIPTION"),
-    )
+        std::env::args_os(),
+    );
+    app::run(command, SHUTDOWN_TIMEOUT, || Ok(()))
 }
 
 #[cfg(test)]
 mod tests {
     #[test]
     fn cli_registry_is_valid() {
-        super::cli().assert_valid();
+        fairway_cli::__private::assert_valid(
+            "fairway",
+            env!("CARGO_PKG_VERSION"),
+            env!("CARGO_PKG_DESCRIPTION"),
+        );
     }
 
     #[test]

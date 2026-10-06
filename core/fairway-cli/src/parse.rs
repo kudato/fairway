@@ -9,70 +9,64 @@ use clap::ArgMatches;
 use crate::handler::{Action, PreparedCommand};
 use crate::registry::{Command, FAIRWAY_CLI_COMMANDS, FAIRWAY_CLI_NAMESPACES, Namespace};
 
-/// The command-line parser used by the Fairway application.
+/// Parses `args` and prepares the selected command for the application.
 ///
 /// The application supplies its name, version, and description.
 /// Namespaces and commands come from linked registrations.
-pub struct Cli {
-    root: clap::Command,
+///
+/// `args` includes the executable name, as in `std::env::args_os()`.
+/// The command contains the parsed arguments and chosen thread count.
+/// The handler runs when the application awaits [`PreparedCommand::run`].
+///
+/// Help, version, and invalid arguments return a [`clap::Error`]. The
+/// application uses its diagnostic and exit code to report the result.
+pub fn parse(
+    name: &'static str,
+    version: &'static str,
+    about: &'static str,
+    args: impl IntoIterator<Item = OsString>,
+) -> Result<PreparedCommand, clap::Error> {
+    let groups = grouped();
+    let mut root = tree(
+        clap::Command::new(name).version(version).about(about),
+        groups,
+    );
+    let mut matches = root.try_get_matches_from_mut(args)?;
+    let (command, mut matches) = selected(groups, &mut matches)
+        .expect("clap requires a namespace and its handler or a subcommand");
+    match (command.prepare)(&mut matches)? {
+        Action::Run(prepared) => Ok(prepared),
+        Action::Help => {
+            let namespace = root
+                .find_subcommand_mut(command.namespace.name)
+                .expect("the selected namespace is in the command tree");
+            Err(namespace
+                .try_get_matches_from_mut([command.namespace.name, "--help"])
+                .expect_err("--help returns clap's help diagnostic"))
+        }
+    }
 }
 
-impl Cli {
-    /// Creates a parser using the application's metadata and linked commands.
-    #[must_use]
-    pub fn new(name: &'static str, version: &'static str, about: &'static str) -> Self {
-        Self {
-            root: clap::Command::new(name).version(version).about(about),
-        }
-    }
-
-    /// Checks the linked namespaces, commands, and clap argument definitions.
-    ///
-    /// Call this in an application test with the same plugins and features
-    /// as the shipped application. Use the default test profile: clap's
-    /// argument checks require debug assertions. It does not run command
-    /// handlers or worker selectors. `cargo build` alone does not run this check.
-    ///
-    /// # Panics
-    ///
-    /// Panics on namespaces without commands, duplicate names, or incompatible
-    /// registrations, and on invalid clap argument definitions when debug
-    /// assertions are enabled.
-    /// Registration conflicts include both declaration locations.
-    pub fn assert_valid(self) {
-        crate::registry::assert_valid();
-        tree(self.root, grouped()).debug_assert();
-    }
-
-    /// Parses `args` and prepares the selected command for the application.
-    ///
-    /// `args` includes the executable name, as in `std::env::args_os()`.
-    /// The command contains the parsed arguments and chosen thread count.
-    /// The handler runs when the application awaits [`PreparedCommand::run`].
-    ///
-    /// Help, version, and invalid arguments return a [`clap::Error`]. The
-    /// application uses its diagnostic and exit code to report the result.
-    pub fn parse(
-        self,
-        args: impl IntoIterator<Item = OsString>,
-    ) -> Result<PreparedCommand, clap::Error> {
-        let groups = grouped();
-        let mut root = tree(self.root, groups);
-        let mut matches = root.try_get_matches_from_mut(args)?;
-        let (command, mut matches) = selected(groups, &mut matches)
-            .expect("clap requires a namespace and its handler or a subcommand");
-        match (command.prepare)(&mut matches)? {
-            Action::Run(prepared) => Ok(prepared),
-            Action::Help => {
-                let namespace = root
-                    .find_subcommand_mut(command.namespace.name)
-                    .expect("the selected namespace is in the command tree");
-                Err(namespace
-                    .try_get_matches_from_mut([command.namespace.name, "--help"])
-                    .expect_err("--help returns clap's help diagnostic"))
-            }
-        }
-    }
+/// Checks the linked namespaces, commands, and clap argument definitions.
+///
+/// Call this in an application test with the same metadata, plugins, and
+/// features as the shipped application. Use the default test profile: clap's
+/// argument checks require debug assertions. It does not run command
+/// handlers or worker selectors. `cargo build` alone does not run this check.
+///
+/// # Panics
+///
+/// Panics on namespaces without commands, duplicate names, or incompatible
+/// registrations, and on invalid clap argument definitions when debug
+/// assertions are enabled.
+/// Registration conflicts include both declaration locations.
+pub fn assert_valid(name: &'static str, version: &'static str, about: &'static str) {
+    crate::registry::assert_valid();
+    tree(
+        clap::Command::new(name).version(version).about(about),
+        grouped(),
+    )
+    .debug_assert();
 }
 
 struct Group<'a> {

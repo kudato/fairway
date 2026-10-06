@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use tokio_util::sync::CancellationToken;
 
-use fairway_cli::__private::{Cli, PreparedCommand};
+use fairway_cli::__private::{PreparedCommand, assert_valid};
 use fairway_cli::{Shutdown, help as namespace_help};
 
 fairway_cli::namespace!(CLI, "text");
@@ -119,12 +119,13 @@ mod sibling {
     );
 }
 
-fn cli() -> Cli {
-    Cli::new("fairway", "1.0", "CLI tests")
-}
-
 fn parse(args: &[&str]) -> Result<PreparedCommand, clap::Error> {
-    cli().parse(args.iter().map(OsString::from))
+    fairway_cli::__private::parse(
+        "fairway",
+        "1.0",
+        "CLI tests",
+        args.iter().map(OsString::from),
+    )
 }
 
 async fn run(args: &[&str]) -> anyhow::Result<()> {
@@ -169,7 +170,7 @@ async fn both_shutdown_signatures_receive_the_shared_request() {
 
 #[test]
 fn help_uses_declarations_and_field_comments() {
-    cli().assert_valid();
+    assert_valid("fairway", "1.0", "CLI tests");
     let root = parse(&["fairway", "--help"])
         .err()
         .expect("expected help")

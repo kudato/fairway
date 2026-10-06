@@ -53,7 +53,7 @@ pub use registry::Namespace;
 #[doc(hidden)]
 pub mod __private {
     pub use crate::handler::{Action, PreparedCommand, Threading, augment, is_help, prepare};
-    pub use crate::parse::Cli;
+    pub use crate::parse::{assert_valid, parse};
     pub use crate::registry::{
         Command, FAIRWAY_CLI_COMMANDS, FAIRWAY_CLI_NAMESPACES, NamespaceCommand,
     };

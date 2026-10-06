@@ -18,7 +18,7 @@ use std::{
     time::Instant,
 };
 
-use fairway_cli::__private::Cli;
+use fairway_cli::__private::parse;
 use fairway_cli::Shutdown;
 
 fairway_cli::namespace!(CLI, "probe");
@@ -290,8 +290,12 @@ fn child_process() {
     args.extend(argument.split_ascii_whitespace());
     println!("CALLER:{:?}", std::thread::current().id());
     let code = app::run(
-        Cli::new("fairway", "1.0", "Process tests"),
-        args.into_iter().map(Into::into),
+        parse(
+            "fairway",
+            "1.0",
+            "Process tests",
+            args.into_iter().map(Into::into),
+        ),
         Duration::from_millis(200),
         || {
             println!("PREPARING");

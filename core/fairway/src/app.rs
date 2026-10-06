@@ -1,22 +1,20 @@
 //! Application preparation, runtime ownership, and command completion.
 
-use std::ffi::OsString;
 use std::io::Write;
 use std::process::ExitCode;
 use std::time::Duration;
 
 use anyhow::Context;
-use fairway_cli::__private::{Cli, Threading};
+use fairway_cli::__private::{PreparedCommand, Threading};
 
 use crate::signal::Supervisor;
 
 pub(crate) fn run(
-    cli: Cli,
-    args: impl IntoIterator<Item = OsString>,
+    command: Result<PreparedCommand, clap::Error>,
     timeout: Duration,
     prepare: impl FnOnce() -> anyhow::Result<()>,
 ) -> ExitCode {
-    let command = match cli.parse(args) {
+    let command = match command {
         Ok(command) => command,
         Err(error) => return report_clap_error(&error),
     };
