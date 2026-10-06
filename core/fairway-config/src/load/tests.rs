@@ -2,7 +2,7 @@
 
 use std::{error::Error as _, fs, path::Path};
 
-use serde::Deserialize;
+use fairway_codec::serde::Deserialize;
 use tempfile::TempDir;
 
 use super::*;
@@ -82,18 +82,39 @@ fn diagnostic(error: &Error) -> String {
 }
 
 #[tokio::test]
-async fn sources_are_optional_and_loading_does_not_create_them() {
+async fn loading_creates_only_the_automatic_template_and_preserves_existing_files() {
     let directory = TempDir::new().unwrap();
     let home = directory.path().join("absent");
     assert!(table(&home).await.unwrap().is_empty());
-    assert!(!home.exists());
+    let template = fs::read_to_string(home.join("config.auto.toml")).unwrap();
+    assert_eq!(
+        template,
+        "# This file is managed automatically by Fairway.\n\
+         # Do not edit it manually.\n\n"
+    );
+    assert!(!home.join("config.toml").exists());
+    assert!(!home.join("conf.d").exists());
     write(&home, "config.toml", "");
     assert!(table(&home).await.unwrap().is_empty());
     assert!(!home.join("conf.d").exists());
+    assert_eq!(
+        fs::read_to_string(home.join("config.auto.toml")).unwrap(),
+        template
+    );
     fs::remove_file(home.join("config.toml")).unwrap();
     write(&home, "conf.d/nested/value.toml", "[settings]\nvalue = 3\n");
     assert_eq!(table(&home).await.unwrap()["value"].as_integer(), Some(3));
     assert!(!home.join("config.toml").exists());
+    fs::remove_dir_all(home.join("conf.d")).unwrap();
+    let existing = "# existing file\n[settings]\nvalue = 4\n";
+    write(&home, "config.auto.toml", existing);
+    assert_eq!(table(&home).await.unwrap()["value"].as_integer(), Some(4));
+    assert_eq!(
+        fs::read_to_string(home.join("config.auto.toml")).unwrap(),
+        existing
+    );
+    assert!(!home.join("config.toml").exists());
+    assert!(!home.join("conf.d").exists());
 }
 
 #[tokio::test]
@@ -170,23 +191,55 @@ value = 2
 "#,
     );
     let actual = table(home.path()).await.unwrap();
-    let expected: toml::Table = toml::from_str(
-        r#"
-numbers = [3]
-empty = []
-records = [{name = "new"}]
-scalar = {value = 2}
-map = "replaced"
-nested = {keep = true, value = 2}
-unchanged = {keep = true}
-"#,
-    )
-    .unwrap();
+    let expected = fairway_codec::toml! {
+        numbers = [3]
+        empty = []
+        records = [{name = "new"}]
+        scalar = {value = 2}
+        map = "replaced"
+        nested = {keep = true, value = 2}
+        unchanged = {keep = true}
+    };
     assert_eq!(actual, expected);
 }
 
+#[tokio::test]
+async fn automatic_settings_override_all_files_and_preserve_unmentioned_keys() {
+    let home = TempDir::new().unwrap();
+    write(
+        home.path(),
+        "config.toml",
+        "[settings]\nvalue = 1\nkeep = true\n[settings.nested]\nkeep = 10\nvalue = 1\n",
+    );
+    write(
+        home.path(),
+        "conf.d/zz-last/zz-last.toml",
+        "[settings]\nvalue = 2\nitems = [1, 2]\n[settings.nested]\nvalue = 2\n",
+    );
+    write(
+        home.path(),
+        "config.auto.toml",
+        "[settings]\nvalue = 3\nitems = [3]\n[settings.nested]\nvalue = 3\n",
+    );
+    let actual = table(home.path()).await.unwrap();
+    let expected = fairway_codec::toml! {
+        value = 3
+        keep = true
+        items = [3]
+        [nested]
+        keep = 10
+        value = 3
+    };
+    assert_eq!(actual, expected);
+
+    write(home.path(), "config.auto.toml", "");
+    let actual = table(home.path()).await.unwrap();
+    assert_eq!(actual["value"].as_integer(), Some(2));
+    assert_eq!(actual["nested"]["value"].as_integer(), Some(2));
+}
+
 #[derive(Debug, Deserialize, PartialEq)]
-#[serde(default, deny_unknown_fields)]
+#[serde(crate = "fairway_codec::serde", default, deny_unknown_fields)]
 struct Settings {
     listen: String,
     ttl: u64,
@@ -243,6 +296,7 @@ async fn deserialization_and_defaults_follow_the_complete_overlay() {
 }
 
 #[derive(Default, Deserialize)]
+#[serde(crate = "fairway_codec::serde")]
 struct Required {
     value: u64,
 }
@@ -250,13 +304,14 @@ static REQUIRED: Namespace<Required> = Namespace::new("required");
 static REQUIRED_REGISTRATION: Registration = Registration::new(&REQUIRED, "test required");
 
 #[derive(Deserialize)]
-#[serde(try_from = "RawRange")]
+#[serde(crate = "fairway_codec::serde", try_from = "RawRange")]
 struct Range {
     start: u64,
     end: u64,
 }
 
 #[derive(Deserialize)]
+#[serde(crate = "fairway_codec::serde")]
 struct RawRange {
     start: u64,
     end: u64,
@@ -296,6 +351,24 @@ async fn plugin_validation_checks_the_final_combined_settings() {
     let values = load(home.path(), vec![&RANGE_REGISTRATION]).await.unwrap();
     let range = values["range"].downcast_ref::<Range>().unwrap();
     assert_eq!((range.start, range.end), (10, 20));
+    write(home.path(), "conf.d/extend.toml", "[range]\nend = 8\n");
+    write(home.path(), "config.auto.toml", "[range]\nend = 30\n");
+    let values = load(home.path(), vec![&RANGE_REGISTRATION]).await.unwrap();
+    let range = values["range"].downcast_ref::<Range>().unwrap();
+    assert_eq!((range.start, range.end), (10, 30));
+    write(home.path(), "config.auto.toml", "[range]\nend = 3\n");
+    let error = load(home.path(), vec![&RANGE_REGISTRATION])
+        .await
+        .unwrap_err();
+    let message = diagnostic(&error);
+    for expected in [
+        "start must precede end",
+        "config.toml",
+        "extend.toml",
+        "config.auto.toml",
+    ] {
+        assert!(message.contains(expected), "{message}");
+    }
 }
 
 #[tokio::test]
@@ -330,17 +403,19 @@ async fn absent_and_empty_tables_differ_and_required_fields_may_span_files() {
 #[tokio::test]
 async fn every_document_is_parsed_even_without_registrations_or_before_an_override() {
     let home = TempDir::new().unwrap();
-    for bytes in [
-        b"[unknown".as_slice(),
-        b"[unknown]\nvalue = '\xff'",
-        b"[unknown]\nx = 1\nx = 2",
-    ] {
-        write(home.path(), "config.toml", bytes);
-        let error = load(home.path(), vec![]).await.unwrap_err();
-        assert!(error.to_string().contains("config.toml"));
-        assert!(error.source().is_some());
+    for relative in ["config.toml", "config.auto.toml"] {
+        for bytes in [
+            b"[unknown".as_slice(),
+            b"[unknown]\nvalue = '\xff'",
+            b"[unknown]\nx = 1\nx = 2",
+        ] {
+            write(home.path(), relative, bytes);
+            let error = load(home.path(), vec![]).await.unwrap_err();
+            assert!(error.to_string().contains(relative));
+            assert!(error.source().is_some());
+        }
+        write(home.path(), relative, "");
     }
-    write(home.path(), "config.toml", "");
     write(home.path(), "conf.d/a.toml", "[settings\n");
     write(home.path(), "conf.d/b.toml", "[settings]\nvalue = 5\n");
     let error = table(home.path()).await.unwrap_err();
@@ -349,7 +424,11 @@ async fn every_document_is_parsed_even_without_registrations_or_before_an_overri
 
 #[tokio::test]
 async fn unknown_top_level_names_are_errors_in_each_file() {
-    for relative in ["config.toml", "conf.d/nested/settings.toml"] {
+    for relative in [
+        "config.toml",
+        "conf.d/nested/settings.toml",
+        "config.auto.toml",
+    ] {
         for namespaces in [vec![], vec![&TABLE_REGISTRATION]] {
             let home = TempDir::new().unwrap();
             let path: PathBuf = home.path().join(relative).components().collect();
@@ -412,7 +491,7 @@ async fn errors_retain_sources_and_name_every_contributing_file() {
             error
                 .source()
                 .unwrap()
-                .downcast_ref::<toml::de::Error>()
+                .downcast_ref::<toml::DecodeError>()
                 .is_some()
         );
     }
@@ -533,8 +612,11 @@ fn dangling_selected_links_and_fifos_fail_without_waiting() {
     reject(home.path(), "broken.toml");
     fs::remove_file(&path).unwrap();
     // The main path exercises descriptor validation; the extra path exercises traversal.
-    for relative in ["config.toml", "conf.d/pipe.toml"] {
+    for relative in ["config.toml", "conf.d/pipe.toml", "config.auto.toml"] {
         let path = home.path().join(relative);
+        if relative == "config.auto.toml" {
+            fs::remove_file(&path).unwrap();
+        }
         assert!(
             Command::new("mkfifo")
                 .arg(&path)

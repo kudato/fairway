@@ -1,10 +1,10 @@
 //! Typed plugin settings loaded once from `config.toml` and recursive `conf.d` files.
 //!
 //! ```
-//! use serde::Deserialize;
+//! use fairway_codec::serde::Deserialize;
 //!
 //! #[derive(Default, Deserialize)]
-//! #[serde(default, deny_unknown_fields)]
+//! #[serde(crate = "fairway_codec::serde", default, deny_unknown_fields)]
 //! struct Settings {
 //!     enabled: bool,
 //! }
@@ -21,9 +21,11 @@
 mod error;
 mod load;
 mod registry;
+mod save;
 
 use std::{any::Any, collections::BTreeMap, marker::PhantomData};
 
+use fairway_codec::serde::Serialize;
 use tokio::sync::OnceCell;
 
 pub use error::Error;
@@ -73,6 +75,63 @@ impl<T: Send + Sync + 'static> Namespace<T> {
             .and_then(|value| value.downcast_ref())
             .expect("namespace! registers this namespace with its settings type")
     }
+
+    /// Saves one override in `config.auto.toml` for the next application startup.
+    ///
+    /// `path` is a nonempty sequence of literal table keys relative to this
+    /// namespace. Missing parent tables are created. The last key is replaced;
+    /// other overrides are preserved. The complete configuration is validated
+    /// before saving. Settings returned by [`get`](Self::get) remain unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if initialization has not succeeded, the namespace has
+    /// not been registered with `T`, the path is empty or traverses a non-table
+    /// override, the value cannot be serialized, the resulting settings are
+    /// invalid, or a file operation fails. Failed updates leave the file unchanged.
+    pub async fn set<V: Serialize>(
+        &'static self,
+        path: &[&str],
+        value: V,
+    ) -> Result<(), Error> {
+        let values = match CONFIG.get() {
+            Some(Ok(values)) => values,
+            _ => {
+                return Err(Error::message(
+                    "configuration is not initialized successfully",
+                ));
+            }
+        };
+        if !values.get(self.name).is_some_and(|value| value.is::<T>()) {
+            return Err(Error::message(format!(
+                "configuration namespace {:?} is not registered with this settings type",
+                self.name,
+            )));
+        }
+        save::set(self.name, path, value).await
+    }
+}
+
+/// Validates all linked declarations without reading configuration or constructing settings.
+///
+/// # Panics
+///
+/// Panics on duplicate names, identifying both declarations.
+pub fn validate_registry() {
+    if let Err(error) = registry::checked() {
+        panic!("{error}");
+    }
+}
+
+/// Loads and publishes all settings once. Completed failures are cached as well.
+/// Cancellation before publication permits a later attempt to retry.
+pub async fn initialize() -> Result<(), Error> {
+    CONFIG
+        .get_or_init(load::registered)
+        .await
+        .as_ref()
+        .map(|_| ())
+        .map_err(Clone::clone)
 }
 
 /// Declares `pub(crate) static NAME: Namespace<T>` for a top-level TOML table.
@@ -108,33 +167,11 @@ macro_rules! namespace {
     };
 }
 
-/// Application startup and macro support, not part of the plugin API.
+/// Macro support, not part of the plugin API.
 #[doc(hidden)]
 pub mod __private {
     pub use crate::registry::{NAMESPACES, Registration};
     pub use linkme;
-
-    /// Validates all linked declarations without reading configuration or constructing settings.
-    ///
-    /// # Panics
-    ///
-    /// Panics on duplicate names, identifying both declarations.
-    pub fn assert_valid() {
-        if let Err(error) = crate::registry::checked() {
-            panic!("{error}");
-        }
-    }
-
-    /// Loads and publishes all settings once. Completed failures are cached as well.
-    /// Cancellation before publication permits a later attempt to retry.
-    pub async fn initialize() -> Result<(), crate::Error> {
-        crate::CONFIG
-            .get_or_init(crate::load::registered)
-            .await
-            .as_ref()
-            .map(|_| ())
-            .map_err(Clone::clone)
-    }
 }
 
 #[cfg(doctest)]

@@ -406,10 +406,8 @@ dependencies = [
  "fairway-codec",
  "fairway-fs",
  "linkme",
- "serde",
  "tempfile",
  "tokio",
- "toml",
 ]
 
 [[package]]

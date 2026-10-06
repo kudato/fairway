@@ -1,4 +1,4 @@
-use serde::de::DeserializeOwned;
+use fairway_codec::{serde::de::DeserializeOwned, toml};
 
 use crate::{Error, Namespace, Value};
 
@@ -7,7 +7,7 @@ pub struct Registration {
     pub(crate) name: &'static str,
     pub(crate) source: &'static str,
     pub(crate) default: fn() -> Value,
-    pub(crate) deserialize: fn(toml::Value) -> Result<Value, toml::de::Error>,
+    pub(crate) deserialize: fn(toml::Value) -> Result<Value, toml::DecodeError>,
 }
 
 impl Registration {

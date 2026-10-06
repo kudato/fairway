@@ -65,6 +65,12 @@ mod formats;
 pub use error::Error;
 pub use formats::{Json, Markdown, Toml, Yaml};
 
+/// Serde traits and derive macros used by structured codecs.
+///
+/// When deriving through this re-export, add
+/// `#[serde(crate = "fairway_codec::serde")]` so the generated code uses it too.
+pub use serde;
+
 /// JSON value types, re-exported from [`serde_json`].
 ///
 /// [`Value`](crate::json::Value) represents a JSON document of any structure

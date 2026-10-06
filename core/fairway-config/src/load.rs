@@ -4,12 +4,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use fairway_codec::Toml;
+use fairway_codec::{Toml, toml};
 use fairway_fs as fs;
 
 use crate::{
     Error, Values,
     registry::{self, Registration},
+    save,
 };
 
 pub(crate) async fn registered() -> Result<Values, Error> {
@@ -21,6 +22,21 @@ pub(crate) async fn registered() -> Result<Values, Error> {
 }
 
 async fn load(home: &Path, namespaces: Vec<&'static Registration>) -> Result<Values, Error> {
+    save::create(home).await?;
+    assemble(home, namespaces, None).await
+}
+
+pub(super) async fn validate_candidate(home: &Path, automatic: toml::Table) -> Result<(), Error> {
+    assemble(home, registry::checked()?, Some(automatic))
+        .await
+        .map(|_| ())
+}
+
+async fn assemble(
+    home: &Path,
+    namespaces: Vec<&'static Registration>,
+    automatic: Option<toml::Table>,
+) -> Result<Values, Error> {
     let mut document = Document::default();
     let primary = home.join("config.toml");
     if let Some(table) = read(&primary, true).await? {
@@ -30,6 +46,12 @@ async fn load(home: &Path, namespaces: Vec<&'static Registration>) -> Result<Val
         let table = read(&path, false).await?.expect("required file");
         document = merge(document, table, path, &namespaces)?;
     }
+    let path = home.join(save::FILE);
+    let table = match automatic {
+        Some(table) => table,
+        None => read(&path, false).await?.expect("required file"),
+    };
+    document = merge(document, table, path, &namespaces)?;
     document.prepare(&namespaces)
 }
 

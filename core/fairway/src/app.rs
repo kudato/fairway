@@ -30,7 +30,7 @@ pub(crate) fn run(
         let runtime =
             build_runtime(command.threading()).context("could not start the async runtime")?;
         let result = runtime.block_on(async {
-            fairway_config::__private::initialize()
+            fairway_config::initialize()
                 .await
                 .context("could not load Fairway configuration")?;
             command.run(supervisor.shutdown().into()).await

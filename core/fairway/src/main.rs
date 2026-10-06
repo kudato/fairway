@@ -36,6 +36,6 @@ mod tests {
 
     #[test]
     fn config_registry_is_valid() {
-        fairway_config::__private::assert_valid();
+        fairway_config::validate_registry();
     }
 }
