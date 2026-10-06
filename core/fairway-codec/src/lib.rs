@@ -20,13 +20,16 @@
 //! | [`String`] | validates UTF-8 without copying | returns the UTF-8 bytes without copying |
 //! | [`Json<T>`] | parses one JSON value into `T` | writes compact JSON and a newline |
 //! | [`Toml<T>`] | parses a TOML document into `T` | writes TOML; comments and layout are lost |
+//! | [`Yaml<T>`] | parses one YAML document into `T` | writes YAML; comments and layout are lost |
 //! | [`Markdown`] | validates UTF-8 and stores the text | returns the stored text unchanged |
 //!
 //! `T` may be any type that implements
 //! [`Deserialize`](trait@serde::Deserialize) for decoding and
-//! [`Serialize`](trait@serde::Serialize) for encoding. It defaults to
-//! [`json::Value`] and [`toml::Value`], which hold a document of any
-//! structure. The [`json`](mod@crate::json) and [`toml`](mod@crate::toml)
+//! [`Serialize`](trait@serde::Serialize) for encoding. [`Json`] and [`Yaml`]
+//! default to [`json::Value`]; [`Toml`] defaults to [`toml::Value`]. The YAML
+//! default supports JSON-compatible values; use a concrete `T` for other YAML
+//! types, such as mappings with composite keys.
+//! The [`json`](mod@crate::json) and [`toml`](mod@crate::toml)
 //! modules re-export these value types, and the [`json!`] and [`toml!`]
 //! macros build them, so a plugin does not need its own dependency on the
 //! parsers.
@@ -60,7 +63,7 @@ mod error;
 mod formats;
 
 pub use error::Error;
-pub use formats::{Json, Markdown, Toml};
+pub use formats::{Json, Markdown, Toml, Yaml};
 
 /// JSON value types, re-exported from [`serde_json`].
 ///
@@ -89,6 +92,13 @@ pub mod toml {
         value,
         value::{Array, Date, Datetime, DatetimeParseError, Offset, Table, Time},
     };
+}
+
+/// YAML parser and serializer errors, re-exported from `serde-saphyr`.
+///
+/// A [`crate::Error`] produced by [`Yaml`] holds one of these as its source.
+pub mod yaml {
+    pub use serde_saphyr::{DeserializeError as DecodeError, SerializeError as EncodeError};
 }
 
 // Re-exported so that plugins can build values without depending on

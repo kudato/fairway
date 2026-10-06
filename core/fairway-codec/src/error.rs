@@ -27,7 +27,7 @@ pub enum Error {
     /// The input is not a valid encoding of the requested type.
     Decode {
         /// The format that could not be decoded: `"text"`, `"json"`, `"toml"`,
-        /// or `"markdown"` for the built-in codecs.
+        /// `"yaml"`, or `"markdown"` for the built-in codecs.
         format: &'static str,
         /// The one-based line of the error, if the decoder reports one.
         line: Option<u64>,
@@ -39,8 +39,8 @@ pub enum Error {
     },
     /// The value cannot be represented in the format.
     Encode {
-        /// The format that could not be encoded: `"json"` or `"toml"` for the
-        /// built-in codecs.
+        /// The format that could not be encoded: `"json"`, `"toml"`, or
+        /// `"yaml"` for the built-in codecs.
         format: &'static str,
         /// The encoder's own error.
         source: Box<dyn error::Error + Send + Sync>,
@@ -117,5 +117,42 @@ pub(crate) fn json_error(format: &'static str, error: serde_json::Error) -> Erro
         line: (error.line() != 0).then_some(error.line() as u64),
         column: (error.column() != 0).then_some(error.column() as u64),
         source: Box::new(error),
+    }
+}
+
+/// Keeps the YAML parser's error and converts its column to a byte column.
+pub(crate) fn yaml_error(text: &str, source: serde_saphyr::DeserializeError) -> Error {
+    let location = source.location();
+    let line = location.map(|location| location.line()).filter(|&n| n != 0);
+    let column = location.and_then(|location| {
+        // serde-saphyr strips a leading BOM before parsing. Its byte offsets
+        // are not available for all errors, so convert character coordinates.
+        // Our first-line columns include the original BOM.
+        let input = text.strip_prefix('\u{feff}').unwrap_or(text);
+        let mut remaining = input;
+        for _ in 1..location.line() {
+            let newline = remaining.find(['\r', '\n'])?;
+            remaining = &remaining[newline..];
+            remaining = remaining.strip_prefix("\r\n").unwrap_or(&remaining[1..]);
+        }
+        let text_line = remaining.split(['\r', '\n']).next()?;
+        let character = usize::try_from(location.column().checked_sub(1)?).ok()?;
+        let offset = text_line
+            .char_indices()
+            .map(|(offset, _)| offset)
+            .chain(std::iter::once(text_line.len()))
+            .nth(character)?;
+        let bom = if location.line() == 1 {
+            text.len() - input.len()
+        } else {
+            0
+        };
+        Some((offset + bom + 1) as u64)
+    });
+    Error::Decode {
+        format: "yaml",
+        line,
+        column,
+        source: Box::new(source),
     }
 }

@@ -4,7 +4,7 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
     Decode, Encode, Error,
-    error::{json_error, position, utf8_error},
+    error::{json_error, position, utf8_error, yaml_error},
 };
 
 /// A JSON value of type `T`.
@@ -201,6 +201,101 @@ impl<T: Serialize> Encode for Toml<T> {
                 format: "toml",
                 source: Box::new(source),
             })
+    }
+}
+
+/// A YAML document deserialized into `T`.
+///
+/// Decoding requires `T: DeserializeOwned`; encoding requires `T: Serialize`.
+/// `T` defaults to [`json::Value`](crate::json::Value), which supports
+/// JSON-compatible values. Use a concrete type for other YAML values, such as
+/// mappings with composite keys or non-finite floating-point numbers.
+///
+/// Decoding accepts one document and rejects duplicate mapping keys. Only
+/// `true` and `false` are inferred as booleans; `yes`, `no`, `on`, and `off`
+/// remain strings. The entire input must be valid UTF-8.
+/// Encoding writes new YAML without preserving source comments or layout.
+///
+/// # Examples
+///
+/// ```
+/// use fairway_codec::{Decode, Encode, Yaml};
+///
+/// let Yaml(mut names): Yaml<Vec<String>> = Yaml::decode(b"- cat\n".to_vec())?;
+/// names.push("dog".to_owned());
+/// let bytes = Yaml(&names).encode()?;
+/// assert_eq!(Yaml::<Vec<String>>::decode(bytes)?.into_inner(), names);
+/// # Ok::<(), fairway_codec::Error>(())
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Yaml<T = crate::json::Value>(pub T);
+
+impl<T> Yaml<T> {
+    /// Consumes the wrapper and returns the value.
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
+impl<T> AsRef<T> for Yaml<T> {
+    fn as_ref(&self) -> &T {
+        &self.0
+    }
+}
+
+impl<T: DeserializeOwned> Decode for Yaml<T> {
+    type Error = Error;
+
+    /// Decodes one YAML document into `T`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Decode`] with format `"yaml"` if the input is not
+    /// valid UTF-8 or YAML, contains multiple documents or duplicate keys,
+    /// or cannot be deserialized into `T`.
+    fn decode(bytes: Vec<u8>) -> Result<Self, Self::Error> {
+        let text =
+            std::str::from_utf8(&bytes).map_err(|source| utf8_error("yaml", &bytes, source))?;
+        let options = serde_saphyr::options! {
+            strict_booleans: true,
+            duplicate_keys: serde_saphyr::DuplicateKeyPolicy::Error,
+            budget: serde_saphyr::budget! { max_documents: 1 },
+        };
+        // The single-document entry point ignores malformed input after `...`.
+        // The stream entry point validates the tail, and the document limit
+        // rejects a second document before deserializing it.
+        let mut documents = serde_saphyr::from_multiple_with_options(text, options.clone())
+            .map_err(|source| yaml_error(text, source))?;
+        let value = match documents.pop() {
+            Some(value) => value,
+            // The stream API skips null and empty documents. The input has
+            // already been validated, so decode these into T separately.
+            None => serde_saphyr::from_str_with_options(text, options)
+                .map_err(|source| yaml_error(text, source))?,
+        };
+        Ok(Self(value))
+    }
+}
+
+impl<T: Serialize> Encode for Yaml<T> {
+    type Error = Error;
+
+    /// Serializes a value as a YAML document. References are accepted too.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Encode`] with format `"yaml"` if serialization fails.
+    fn encode(self) -> Result<Vec<u8>, Self::Error> {
+        // Expanded indentation also keeps sequence-valued mapping keys valid.
+        serde_saphyr::to_string_with_options(
+            &self.0,
+            serde_saphyr::ser_options! { compact_list_indent: false },
+        )
+        .map(String::into_bytes)
+        .map_err(|source| Error::Encode {
+            format: "yaml",
+            source: Box::new(source),
+        })
     }
 }
 

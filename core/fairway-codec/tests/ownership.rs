@@ -2,7 +2,7 @@
 
 use std::{error::Error as _, str::Utf8Error};
 
-use fairway_codec::{Decode, Error, Json, Markdown, Toml};
+use fairway_codec::{Decode, Error, Json, Markdown, Toml, Yaml};
 
 #[test]
 fn invalid_utf8_errors_keep_their_position_and_incomplete_length() {
@@ -19,6 +19,7 @@ fn invalid_utf8_errors_keep_their_position_and_incomplete_length() {
             ("markdown", Markdown::decode(bytes.clone()).unwrap_err()),
             ("json", Json::<String>::decode(bytes.clone()).unwrap_err()),
             ("toml", Toml::<String>::decode(bytes.clone()).unwrap_err()),
+            ("yaml", Yaml::<String>::decode(bytes.clone()).unwrap_err()),
         ] {
             assert_eq!(
                 error.source().unwrap().downcast_ref::<Utf8Error>(),
