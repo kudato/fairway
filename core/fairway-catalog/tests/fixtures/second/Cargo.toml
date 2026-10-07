@@ -1,0 +1,11 @@
+[package]
+name = "catalog-fixture-second"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+catalog.workspace = true
+
+[build-dependencies]
+catalog = { workspace = true, features = ["build"] }

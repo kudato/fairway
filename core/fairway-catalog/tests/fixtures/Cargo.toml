@@ -1,0 +1,11 @@
+[workspace]
+resolver = "3"
+members = ["first", "second", "app"]
+
+[workspace.dependencies]
+catalog = { package = "fairway-catalog", path = "../.." }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "none"

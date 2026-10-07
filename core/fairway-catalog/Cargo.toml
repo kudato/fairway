@@ -1,0 +1,25 @@
+[package]
+name = "fairway-catalog"
+description = "Mutable in-memory catalog with compressed builtin data for Fairway"
+documentation = "https://docs.rs/fairway-catalog"
+readme = "../../README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+build = []
+
+[dependencies]
+linkme.workspace = true
+zstd.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

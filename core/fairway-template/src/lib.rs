@@ -16,12 +16,12 @@
 //!
 //! let template = Template::compile(
 //!     "report",
-//!     "Ветка: {{ branch }}\nФайлы: {{ files | join(', ') }}\n",
+//!     "Branch: {{ branch }}\nFiles: {{ files | join(', ') }}\n",
 //! )?;
 //! let report = Report { branch: "main", files: &["one.rs", "two.rs"] };
 //! assert_eq!(
 //!     template.render(&report)?,
-//!     "Ветка: main\nФайлы: one.rs, two.rs\n",
+//!     "Branch: main\nFiles: one.rs, two.rs\n",
 //! );
 //! # Ok::<(), fairway_template::Error>(())
 //! ```
@@ -112,13 +112,13 @@ impl Template {
     /// use fairway_template::Template;
     /// use std::collections::BTreeMap;
     ///
-    /// let template = Template::compile("heading", "{{ title | default('Без названия') }}")?;
-    /// let context = BTreeMap::from([("title", "Отчёт")]);
-    /// assert_eq!(template.render(&context)?, "Отчёт");
-    /// assert_eq!(template.render(())?, "Без названия");
+    /// let template = Template::compile("heading", "{{ title | default('Untitled') }}")?;
+    /// let context = BTreeMap::from([("title", "Report")]);
+    /// assert_eq!(template.render(&context)?, "Report");
+    /// assert_eq!(template.render(())?, "Untitled");
     /// for context in [Some(&context), None] {
     ///     let rendered = template.render(context)?;
-    ///     assert_eq!(rendered, if context.is_some() { "Отчёт" } else { "Без названия" });
+    ///     assert_eq!(rendered, if context.is_some() { "Report" } else { "Untitled" });
     /// }
     /// # Ok::<(), fairway_template::Error>(())
     /// ```

@@ -27,10 +27,10 @@ fn renders_borrowed_structs_and_reuses_the_context() {
     };
     let template = Template::compile(
         "report",
-        "Ветка: {{ branch }}\nФайлы: {{ files | join(', ') }}\n",
+        "Branch: {{ branch }}\nFiles: {{ files | join(', ') }}\n",
     )
     .unwrap();
-    let expected = "Ветка: main\nФайлы: one.rs, two.rs\n";
+    let expected = "Branch: main\nFiles: one.rs, two.rs\n";
     assert_eq!(template.render(&report).unwrap(), expected);
     assert_eq!(template.render(&report).unwrap(), expected);
     assert_eq!(template.name(), "report");
@@ -44,12 +44,12 @@ fn renders_each_context_independently() {
         name: &'a str,
     }
 
-    let template = Template::compile("greeting", "Привет, {{ name }}!").unwrap();
-    let greetings: Result<Vec<_>, _> = ["Анна", "Борис"]
+    let template = Template::compile("greeting", "Hello, {{ name }}!").unwrap();
+    let greetings: Result<Vec<_>, _> = ["Anna", "Boris"]
         .into_iter()
         .map(|name| template.render(Greeting { name }))
         .collect();
-    assert_eq!(greetings.unwrap(), ["Привет, Анна!", "Привет, Борис!"]);
+    assert_eq!(greetings.unwrap(), ["Hello, Anna!", "Hello, Boris!"]);
     assert_eq!(
         template.render(()).unwrap_err().kind(),
         ErrorKind::Undefined
@@ -60,10 +60,10 @@ fn renders_each_context_independently() {
 fn empty_and_optional_contexts_still_execute_the_template() {
     let template = Template::compile(
         "heading",
-        "{# hidden comment #}{{ title | default('Без названия') }}:{{ 1 + 2 }}",
+        "{# hidden comment #}{{ title | default('Untitled') }}:{{ 1 + 2 }}",
     )
     .unwrap();
-    let empty = "Без названия:3";
+    let empty = "Untitled:3";
     assert_eq!(template.render(()).unwrap(), empty);
     assert_eq!(template.render(json!(null)).unwrap(), empty);
     assert_eq!(
@@ -75,26 +75,22 @@ fn empty_and_optional_contexts_still_execute_the_template() {
         empty
     );
 
-    let context = BTreeMap::from([("title", "Отчёт")]);
+    let context = BTreeMap::from([("title", "Report")]);
     for context in [Some(&context), None] {
-        let expected = if context.is_some() {
-            "Отчёт:3"
-        } else {
-            empty
-        };
+        let expected = if context.is_some() { "Report:3" } else { empty };
         assert_eq!(template.render(context).unwrap(), expected);
     }
 }
 
 #[test]
 fn context_fields_can_be_added_and_removed_at_runtime() {
-    let template = Template::compile("heading", "{{ title | default('Без названия') }}").unwrap();
+    let template = Template::compile("heading", "{{ title | default('Untitled') }}").unwrap();
     let mut context = BTreeMap::new();
-    assert_eq!(template.render(&context).unwrap(), "Без названия");
-    context.insert("title", "Отчёт");
-    assert_eq!(template.render(&context).unwrap(), "Отчёт");
+    assert_eq!(template.render(&context).unwrap(), "Untitled");
+    context.insert("title", "Report");
+    assert_eq!(template.render(&context).unwrap(), "Report");
     context.remove("title");
-    assert_eq!(template.render(&context).unwrap(), "Без названия");
+    assert_eq!(template.render(&context).unwrap(), "Untitled");
 }
 
 #[test]
@@ -137,10 +133,10 @@ fn rejects_roots_without_named_fields() {
 
 #[test]
 fn distinguishes_missing_null_and_empty_fields() {
-    let template = Template::compile("default", "{{ title | default('Без названия') }}").unwrap();
+    let template = Template::compile("default", "{{ title | default('Untitled') }}").unwrap();
     for (context, expected) in [
-        (json!({}), "Без названия"),
-        (json!({ "title": "Отчёт" }), "Отчёт"),
+        (json!({}), "Untitled"),
+        (json!({ "title": "Report" }), "Report"),
         (json!({ "title": "" }), ""),
         (json!({ "title": null }), "None"),
         (json!({ "title": false }), "False"),
@@ -156,8 +152,7 @@ fn distinguishes_missing_null_and_empty_fields() {
     }
     assert_eq!(template.render(Heading { title: None }).unwrap(), "None");
 
-    let template =
-        Template::compile("default", "{{ title | default('Без названия', true) }}").unwrap();
+    let template = Template::compile("default", "{{ title | default('Untitled', true) }}").unwrap();
     for title in [
         json!(null),
         json!(""),
@@ -168,7 +163,7 @@ fn distinguishes_missing_null_and_empty_fields() {
     ] {
         assert_eq!(
             template.render(json!({ "title": title })).unwrap(),
-            "Без названия"
+            "Untitled"
         );
     }
 }
@@ -275,8 +270,8 @@ fn keeps_values_literal_and_only_escapes_explicitly() {
         template.render(json!({ "value": "<&" })).unwrap(),
         "&lt;&amp;"
     );
-    let template = Template::compile("raw", "{% raw %}Пример: {{ name }}{% endraw %}").unwrap();
-    assert_eq!(template.render(()).unwrap(), "Пример: {{ name }}");
+    let template = Template::compile("raw", "{% raw %}Example: {{ name }}{% endraw %}").unwrap();
+    assert_eq!(template.render(()).unwrap(), "Example: {{ name }}");
 }
 
 struct Counted<'a> {
@@ -388,8 +383,8 @@ fn reports_owned_diagnostics_and_recovers_after_render_errors() {
         assert!(!error.to_string().contains('\n'));
     }
     assert_eq!(
-        Template::compile(" имя с пробелами ", "").unwrap().name(),
-        " имя с пробелами "
+        Template::compile(" name with spaces ", "").unwrap().name(),
+        " name with spaces "
     );
 
     let error = Template::compile("syntax", "first line\n{{").err().unwrap();

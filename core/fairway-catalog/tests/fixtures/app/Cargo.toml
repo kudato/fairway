@@ -1,0 +1,10 @@
+[package]
+name = "catalog-fixture-app"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+catalog.workspace = true
+catalog-fixture-first = { path = "../first" }
+catalog-fixture-second = { path = "../second" }
