@@ -22,8 +22,9 @@
 //! | [`Toml<T>`] | parses a TOML document into `T` | writes TOML; comments and layout are lost |
 //! | [`Yaml<T>`] | parses one YAML document into `T` | writes YAML; comments and layout are lost |
 //! | [`Markdown`] | validates UTF-8 and stores the text | returns the stored text unchanged |
+//! | [`Zstd<T>`] | decompresses bytes, then decodes `T` | encodes `T`, then compresses its bytes |
 //!
-//! `T` may be any type that implements
+//! For [`Json`], [`Toml`], and [`Yaml`], `T` may be any type that implements
 //! [`Deserialize`](trait@serde::Deserialize) for decoding and
 //! [`Serialize`](trait@serde::Serialize) for encoding. [`Json`] and [`Yaml`]
 //! default to [`json::Value`]; [`Toml`] defaults to [`toml::Value`]. The YAML
@@ -33,6 +34,9 @@
 //! modules re-export these value types, and the [`json!`] and [`toml!`]
 //! macros build them, so a plugin does not need its own dependency on the
 //! parsers.
+//!
+//! [`Zstd`] defaults to [`Vec<u8>`]. It composes with other codecs, such as
+//! `Zstd<Json<T>>`, using [`Decode`] and [`Encode`] for the inner value.
 //!
 //! # Examples
 //!
@@ -59,9 +63,11 @@
 //! as [`String`] or [`Toml`], and converts the result; the trait documentation
 //! shows examples.
 
+mod compression;
 mod error;
 mod formats;
 
+pub use compression::Zstd;
 pub use error::Error;
 pub use formats::{Json, Markdown, Toml, Yaml};
 

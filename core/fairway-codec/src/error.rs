@@ -2,7 +2,7 @@ use std::{error, fmt};
 
 /// An error returned by the built-in codecs.
 ///
-/// The error names the format that failed and keeps the parser's own error as
+/// The error names the format that failed and keeps the underlying error as
 /// its [`source`](error::Error::source), so callers can inspect or downcast
 /// it. The [`Display`](fmt::Display) output has the form
 /// `cannot decode {format} at line {line}, column {column}: {source}` or
@@ -27,7 +27,7 @@ pub enum Error {
     /// The input is not a valid encoding of the requested type.
     Decode {
         /// The format that could not be decoded: `"text"`, `"json"`, `"toml"`,
-        /// `"yaml"`, or `"markdown"` for the built-in codecs.
+        /// `"yaml"`, `"markdown"`, or `"zstd"` for the built-in codecs.
         format: &'static str,
         /// The one-based line of the error, if the decoder reports one.
         line: Option<u64>,
@@ -39,8 +39,8 @@ pub enum Error {
     },
     /// The value cannot be represented in the format.
     Encode {
-        /// The format that could not be encoded: `"json"`, `"toml"`, or
-        /// `"yaml"` for the built-in codecs.
+        /// The format that could not be encoded: `"json"`, `"toml"`,
+        /// `"yaml"` or `"zstd"` for the built-in codecs.
         format: &'static str,
         /// The encoder's own error.
         source: Box<dyn error::Error + Send + Sync>,

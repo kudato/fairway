@@ -418,6 +418,7 @@ dependencies = [
  "serde-saphyr",
  "serde_json",
  "toml",
+ "zstd",
 ]
 
 [[package]]

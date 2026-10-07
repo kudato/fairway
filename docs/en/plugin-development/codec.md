@@ -1,47 +1,59 @@
 # fairway-codec
 
-Conversions between complete byte buffers and Rust values.
+The crate turns a complete byte buffer into a Rust value and back. It supports
+[text](#values-and-types), [JSON](#json-and-toml), [TOML](#json-and-toml),
+[YAML](#yaml), [Markdown](#markdown), and [Zstd compression](#zstd).
 
-The crate turns bytes into Rust values and back: text, JSON, TOML, and
-Markdown. It does not know where the bytes come from: other crates provide
-the sources and destinations of data. For example, [fairway-fs](fs.md) reads
-and writes files in the same formats. Use `fairway-codec` directly for
-in-memory data, such as data received over the network, and for custom
-formats.
+`Decode::decode` parses bytes into a value of the given type, and
+`Encode::encode` turns a value into bytes. Both operations are synchronous and
+work with the whole buffer.
 
-Plugin dependency:
+Plugin dependencies:
 
 ```toml
 [dependencies]
 fairway-codec.workspace = true
+anyhow.workspace = true
 ```
 
 ## Quick start
 
-`Decode::decode` parses bytes into a value of the given type, and
-`Encode::encode` turns a value into bytes. The type determines the format:
-`Json<Vec<String>>` is a JSON array of strings.
-
 ```rust
-use fairway_codec::{self as codec, Decode, Encode, Json};
+use fairway_codec::serde::Serialize;
+use fairway_codec::{Encode, Error, Json};
 
-fn add_word(input: Vec<u8>) -> Result<Vec<u8>, codec::Error> {
-    let Json(mut words): Json<Vec<String>> = Json::decode(input)?;
-    words.push("mouse".to_owned());
-    Json(words).encode()
+#[derive(Serialize)]
+#[serde(crate = "fairway_codec::serde")]
+struct Settings {
+    name: String,
+    retries: u32,
+}
+
+fn settings_json() -> Result<Vec<u8>, Error> {
+    let settings = Settings {
+        name: "example".to_owned(),
+        retries: 3,
+    };
+
+    Json(settings).encode()
 }
 ```
 
-- Both methods work with the whole buffer; there is no streaming.
-- They take ownership of their input and may reuse its memory instead of
-  copying it. If you still need the original data, make a copy first.
-- Conversions are synchronous and run on the calling thread. When
-  `fairway-fs` reads or writes a file, the conversion runs on a separate
-  thread for blocking operations. If you convert large data directly in an
-  asynchronous task, move the work to `tokio::task::spawn_blocking` so that it
-  does not hold up other tasks.
+Result:
 
-## Built-in formats
+```json
+{"name":"example","retries":3}
+```
+
+`Settings` is a regular Rust struct. `#[derive(Serialize)]` adds serialization
+for its fields, and `Json(settings).encode()` turns the struct value into
+JSON bytes with a final newline.
+
+## Values and types
+
+The type determines the format: `Json<Vec<String>>` is a JSON array of
+strings, and `Toml<Dataset>` is a TOML document with the structure of
+`Dataset`.
 
 | Type | Decoding | Encoding |
 |---|---|---|
@@ -50,61 +62,170 @@ fn add_word(input: Vec<u8>) -> Result<Vec<u8>, codec::Error> {
 | `[u8; N]` | — | copies the array |
 | `Json<T>` | one JSON document | compact JSON and a newline |
 | `Toml<T>` | a TOML document | TOML without the original comments and layout |
+| `Yaml<T>` | one YAML document | YAML without the original comments and layout |
 | `Markdown` | validates UTF-8 and keeps the text | the source text byte for byte |
+| `Zstd<T>` | decompresses bytes and decodes `T` | encodes `T` and compresses its bytes |
 
-## JSON and TOML
+For `Json<T>`, `Toml<T>`, and `Yaml<T>`, `T` must implement `Deserialize` for
+reading and `Serialize` for writing. Serde traits and derive macros are
+available through `fairway_codec::serde`. Use
+`#[serde(crate = "fairway_codec::serde")]` so generated code uses this
+re-export too.
 
-`Json<T>` and `Toml<T>` wrap a value that implements `serde`. If the shape of
-the data is known, describe it with a type:
+If the shape of the data is known, describe it with a type:
 
 ```rust
-use fairway_codec::{self as codec, Decode, Encode, Toml};
-use serde::{Deserialize, Serialize};
+use fairway_codec::serde::{Deserialize, Serialize};
+use fairway_codec::{Decode, Encode, Error, Toml};
 
 #[derive(Deserialize, Serialize)]
+#[serde(crate = "fairway_codec::serde")]
 struct Dataset {
     name: String,
     files: Vec<String>,
 }
 
-fn add_part(input: Vec<u8>) -> Result<Vec<u8>, codec::Error> {
-    let Toml(mut dataset): Toml<Dataset> = Toml::decode(input)?;
+fn main() -> Result<(), Error> {
+    let input = br#"name = "events"
+files = ["part-01.jsonl"]
+"#
+    .to_vec();
+
+    let Toml(mut dataset) = Toml::<Dataset>::decode(input)?;
     dataset.files.push("part-02.jsonl".to_owned());
-    Toml(dataset).encode()
+
+    let output = Toml(dataset).encode()?;
+    print!("{}", String::decode(output)?);
+    Ok(())
 }
 ```
 
-Without a type parameter, the generic `json::Value` or `toml::Value` is used.
+The TOML document is decoded into `Dataset`, then another file is added to
+its `files` field. Encoding produces:
+
+```toml
+name = "events"
+files = ["part-01.jsonl", "part-02.jsonl"]
+```
+
+The methods take ownership of their input and may reuse its memory instead of
+copying it. If you still need the original bytes, make a copy first. To encode
+a value while keeping it in the calling code, pass a reference:
+`Json(&value).encode()`, `Toml(&value).encode()`, or `Yaml(&value).encode()`.
+
+## Data without a fixed structure
+
+If the shape of the data is determined at runtime, use generic values. Without
+a type parameter, `Json` and `Yaml` use `json::Value`, and `Toml` uses
+`toml::Value`.
+
 The `json!` and `toml!` macros build such values without a direct dependency
-on `serde_json` or `toml`.
+on `serde_json` or `toml`:
 
 ```rust
-use fairway_codec::{self as codec, Decode, Encode, Json, json};
+use fairway_codec::{Decode, Encode, Error, Json, json};
 
-fn version(input: Vec<u8>) -> Result<Option<String>, codec::Error> {
-    let Json(document): Json = Json::decode(input)?;
-    Ok(document["version"].as_str().map(str::to_owned))
-}
+fn main() -> Result<(), Error> {
+    let input = br#"{"name":"example","ready":false}"#.to_vec();
+    let Json(mut document): Json = Json::decode(input)?;
+    document["ready"] = json!(true);
 
-fn status(name: &str, ready: bool) -> Result<Vec<u8>, codec::Error> {
-    Json(json!({ "name": name, "ready": ready })).encode()
+    let output = Json(document).encode()?;
+    print!("{}", String::decode(output)?);
+    Ok(())
 }
 ```
 
-- JSON is encoded compactly, followed by a newline. When decoding, only
-  whitespace may follow the value, and invalid UTF-8 is rejected anywhere in
-  the input, even in fields that the type skips.
-- The top level of a TOML document is always a table, so `T` is usually
-  a struct or a map.
-- Encoding TOML loses comments, blank lines, and the original layout. To keep
-  them, edit the document as a `String`.
-- To encode a value without giving it up, pass a reference:
-  `Json(&value).encode()`.
+`document` has type `json::Value`: fields are accessed by string keys.
+Here, `ready` changes while `name` is preserved:
+
+```json
+{"name":"example","ready":true}
+```
+
+The generic value used by `Yaml` supports data representable in JSON. For
+other YAML types, such as mappings with composite keys, specify a concrete
+`T`.
+
+## Where the data comes from
+
+The caller prepares the bytes, obtaining them from a file, the network, or
+another source. A codec performs only the in-memory conversion, without I/O.
+
+For example, [fairway-fs](fs.md) reads and writes files through the same
+traits. To work with it, the type must be `Send + 'static`, and its error must
+be `Send` and convert into `Box<dyn Error + Send + Sync>`. For example,
+`anyhow::Error`, `io::Error`, `codec::Error`, and `Infallible` all do.
+
+When called directly, conversions run on the calling thread. When reading and
+writing files, `fairway-fs` runs them on a separate thread for blocking
+operations. If you convert large data directly in an asynchronous task, move
+the work to `tokio::task::spawn_blocking` so that it does not hold up other
+tasks.
+
+## JSON and TOML
+
+JSON is encoded compactly, followed by a newline. When decoding, only
+whitespace may follow the value, and invalid UTF-8 is rejected anywhere in the
+input, even in fields that the type skips.
+
+The top level of a TOML document is always a table, so `T` is usually a struct
+or a map.
+
+Encoding TOML loses comments, blank lines, and the original layout. To keep
+them, edit the document as a `String`.
+
+## YAML
+
+`Yaml<T>` reads and writes one YAML document. For example, this changes a name
+in metadata:
+
+```rust
+use fairway_codec::serde::{Deserialize, Serialize};
+use fairway_codec::{Decode, Encode, Error, Yaml};
+
+#[derive(Deserialize, Serialize)]
+#[serde(crate = "fairway_codec::serde")]
+struct Metadata {
+    name: String,
+    description: String,
+}
+
+fn main() -> Result<(), Error> {
+    let input = b"name: draft\ndescription: Check changes.\n".to_vec();
+    let Yaml(mut metadata) = Yaml::<Metadata>::decode(input)?;
+    metadata.name = "review".to_owned();
+
+    let output = Yaml(metadata).encode()?;
+    print!("{}", String::decode(output)?);
+    Ok(())
+}
+```
+
+After decoding, the Rust struct's `name` field changes while `description`
+is preserved. Encoding produces:
+
+```yaml
+name: review
+description: Check changes.
+```
+
+The entire input must be valid UTF-8. Multiple documents in one buffer and
+duplicate mapping keys are errors.
+
+Only `true` and `false` are inferred as booleans. Values such as `yes`, `no`,
+`on`, and `off` remain strings.
+
+Encoding preserves values, but not the source comments and layout. To preserve
+the document's text, edit it as a `String`.
+
+`Yaml` handles YAML itself. The code for a particular format extracts the
+header between `---` lines from Markdown and validates skill fields.
 
 ## Markdown
 
-`Markdown` keeps the source text of a document. `events()` parses it into
-a sequence of events: start and end of a heading, paragraph, list, pieces of
+`Markdown` keeps the source text of a document. `events()` parses it into a
+sequence of events: start and end of a heading, paragraph, list, pieces of
 text, and so on. The event types are in `codec::markdown`; they are the
 [pulldown-cmark](https://docs.rs/pulldown-cmark) types.
 
@@ -139,42 +260,189 @@ fn titles(document: &Markdown) -> Vec<String> {
 }
 
 fn main() {
-    let document = Markdown::parse("# Intro\n\nText.\n\n# Use `fairway`\n".to_owned());
-    assert_eq!(titles(&document), ["Intro", "Use fairway"]);
+    let source = "# Intro\n\nText.\n\n## Details\n\n# Use `fairway`\n";
+    let document = Markdown::parse(source.to_owned());
+    let headings = titles(&document);
 
-    for source in ["First\nsecond\n===\n", "First  \nsecond\n===\n"] {
-        let document = Markdown::parse(source.to_owned());
-        assert_eq!(titles(&document), ["First second"]);
-    }
+    assert_eq!(headings, ["Intro", "Use fairway"]);
+    println!("{headings:?}");
 }
 ```
 
-- CommonMark is supported without extensions: tables, footnotes,
-  strikethrough, task lists, and front matter are not recognized.
-- `encode` returns the source text byte for byte, so decoding and encoding
-  never change a document.
-- Each `events()` call parses the document again, synchronously on the
-  calling thread. If you need the events more than once, collect them into
-  a vector.
-- Events borrow text from the document where possible. To keep them longer
-  than the document, convert them with `Event::into_static`.
-- Events are read-only. To change a document, build the new text and wrap it
-  with `Markdown::parse`.
+Only first-level headings are extracted. Inline code is included in the
+heading text, while the second-level `Details` heading is skipped:
+
+```text
+["Intro", "Use fairway"]
+```
+
+CommonMark is supported without extensions: tables, footnotes, strikethrough,
+task lists, and front matter are not recognized.
+
+`encode` returns the source text byte for byte, so decoding and encoding never
+change a document.
+
+Each `events()` call parses the document again, synchronously on the calling
+thread. If you need the events more than once, collect them into a vector.
+
+Events borrow text from the document where possible. To keep them longer than
+the document, convert them with `Event::into_static`. Events are read-only. To
+change a document, build the new text and wrap it with `Markdown::parse`.
+
+## Zstd
+
+`Zstd<T>` wraps an ordinary value of type `T`. Encoding calls `T::encode()`
+and compresses the resulting bytes at level 3. Decoding decompresses the input
+and passes the complete buffer to `T::decode()`.
+
+Without a type parameter, `Zstd` uses `Vec<u8>` for arbitrary bytes. Use
+`Zstd<String>` for text or compose it with a structured codec, such as
+`Zstd<Json<T>>`:
+
+```rust
+use fairway_codec::serde::{Deserialize, Serialize};
+use fairway_codec::{Decode, Encode, Error, Json, Zstd};
+
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
+#[serde(crate = "fairway_codec::serde")]
+struct Settings {
+    name: String,
+    retries: u32,
+}
+
+fn main() -> Result<(), Error> {
+    let settings = Settings {
+        name: "example".to_owned(),
+        retries: 3,
+    };
+
+    let packed = Zstd(Json(&settings)).encode()?;
+    let Zstd(Json(restored)) = Zstd::<Json<Settings>>::decode(packed)?;
+
+    assert_eq!(restored, settings);
+    println!("{restored:?}");
+    Ok(())
+}
+```
+
+Encoding turns `Settings` into JSON, then into compressed bytes. Decoding
+reverses these conversions, producing another `Settings` value:
+
+```text
+Settings { name: "example", retries: 3 }
+```
+
+`Json(&settings)` borrows the original struct, so it remains available
+after encoding.
+
+Encoding requires `T: Encode`; decoding requires `T: Decode`. The other
+direction is not required. The inner codec's error must convert into
+`Box<dyn std::error::Error + Send + Sync>`, as built-in codec errors,
+`io::Error`, `anyhow::Error`, and `Infallible` do.
+
+The result is a standard Zstd frame. It has no Fairway header identifying the
+inner format; the caller selects the type when decoding. Concatenated frames
+are decompressed into one buffer before the inner decoder runs.
+
+Both operations work on complete buffers in memory. Decompression has no
+application-defined output size limit.
+
+`into_inner()` returns the wrapped value; `as_ref()` borrows it. The wrapper
+itself holds the ordinary value, not its compressed representation.
+
+## Custom formats
+
+For your own format, implement `Decode` and `Encode` for your type. The
+built-in codecs are handy inside.
+
+For example, a `Point` can be stored as two integers separated by a comma.
+The decoder turns the bytes `12,34` into `Point { x: 12, y: 34 }`, and the
+encoder turns the struct back into bytes:
+
+```rust
+use std::convert::Infallible;
+
+use anyhow::Context;
+use fairway_codec::{Decode, Encode};
+
+#[derive(Debug, PartialEq)]
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+impl Decode for Point {
+    type Error = anyhow::Error;
+
+    fn decode(bytes: Vec<u8>) -> anyhow::Result<Self> {
+        let text = String::decode(bytes)?;
+        let (x, y) = text.split_once(',').context("expected x,y")?;
+        Ok(Self {
+            x: x.parse().context("invalid x coordinate")?,
+            y: y.parse().context("invalid y coordinate")?,
+        })
+    }
+}
+
+impl Encode for Point {
+    type Error = Infallible;
+
+    fn encode(self) -> Result<Vec<u8>, Self::Error> {
+        format!("{},{}", self.x, self.y).encode()
+    }
+}
+
+fn main() -> anyhow::Result<()> {
+    let point = Point::decode(b"12,34".to_vec())?;
+    assert_eq!(point, Point { x: 12, y: 34 });
+
+    let Ok(bytes) = Point { x: -5, y: 8 }.encode();
+    assert_eq!(bytes, b"-5,8");
+    Ok(())
+}
+```
+
+`decode` and `encode` should perform only the conversion, without I/O. This
+lets different consumers use the codec. In particular, `fairway-fs` calls it
+while holding the file's lock in `write` and `edit`.
 
 ## Errors
 
-Built-in formats that can fail return `codec::Error`:
+Built-in codecs that can fail return `fairway_codec::Error`. The message
+includes the format and, when the error's location is known, the line and
+column:
 
-- `Decode { format, line, column, source }`: the data could not be parsed;
-- `Encode { format, source }`: the value could not be encoded.
+```text
+cannot decode json at line 3, column 2: expected value at line 3 column 2
+```
 
-`format` is `"text"` (for `String`), `"json"`, `"toml"`, or `"markdown"`.
-`line` and `column` start at 1 and are set when the position is known; the
-column counts bytes. For invalid UTF-8, this is the position of the first
-invalid byte. The parser's error is available in `source`.
+For handling errors in code, use the error variants and their fields:
 
-Formats that cannot fail use the `Infallible` error type. The result of such
-a conversion can be taken without `unwrap`:
+| Variant | What happened |
+|---|---|
+| `Decode { format, line, column, source }` | The data could not be decoded |
+| `Encode { format, source }` | The value could not be encoded |
+
+`format` is `"text"` (for `String`), `"json"`, `"toml"`, `"yaml"`,
+`"markdown"`, or `"zstd"`. Line and column numbers start at one; the column
+counts bytes. For invalid UTF-8, this is the position of the first invalid
+byte.
+
+The underlying error is available through `std::error::Error::source()`.
+`Error` implements `std::error::Error + Send + Sync` and owns its diagnostic
+information.
+
+The original YAML error types are available as `codec::yaml::DecodeError` and
+`codec::yaml::EncodeError`; plugins do not need a YAML parser dependency.
+
+A `Zstd` error always has format `"zstd"`, without a line or column. Its
+`source()` retains the compression or inner codec error, including any
+position reported by the inner decoder.
+
+You choose the error type for a custom codec. In the example above,
+`Point::decode` uses `anyhow::Error`, and `Point::encode` uses `Infallible`.
+Formats that cannot fail use `Infallible`. The result of such a conversion
+can be taken without `unwrap`:
 
 ```rust
 use fairway_codec::Encode;
@@ -185,115 +453,8 @@ assert_eq!(bytes, b"text");
 
 When a file is read or written through `fairway-fs`, a decoding error becomes
 the source of an `fs::Error` of kind `InvalidData`, and an encoding error the
-source of one of kind `InvalidInput`.
+source of one of kind `InvalidInput`. A panic in the invoked codec resumes in
+the task that awaits `read`, `write`, or `edit`, and the file is left
+unchanged.
 
-## Custom formats
-
-To convert your own format and use it with `fairway-fs`, implement `Decode`
-and `Encode` for your type. The built-in formats are handy inside.
-
-Example: Markdown with a required TOML header between `+++` lines.
-
-```text
-+++
-title = "Dataset"
-+++
-# Description
-
-The first part of the dataset.
-```
-
-```rust
-use anyhow::Context;
-use fairway_codec::{Decode, Encode, Markdown, Toml};
-use serde::{Deserialize, Serialize};
-
-#[derive(Deserialize, Serialize)]
-struct Frontmatter {
-    title: String,
-}
-
-struct Article {
-    frontmatter: Frontmatter,
-    body: Markdown,
-}
-
-impl Decode for Article {
-    type Error = anyhow::Error;
-
-    fn decode(bytes: Vec<u8>) -> anyhow::Result<Self> {
-        let text = String::decode(bytes)?;
-        let content = text
-            .strip_prefix("+++\r\n")
-            .or_else(|| text.strip_prefix("+++\n"))
-            .context("the document must start with TOML frontmatter")?;
-        let mut header_end = 0;
-        for line in content.split_inclusive('\n') {
-            if line.trim_end_matches(['\r', '\n']) == "+++" {
-                let header = &content[..header_end];
-                let body = &content[header_end + line.len()..];
-                let Toml(frontmatter) = Toml::decode(header.as_bytes().to_vec())?;
-                return Ok(Self {
-                    frontmatter,
-                    body: Markdown::parse(body.to_owned()),
-                });
-            }
-            header_end += line.len();
-        }
-        anyhow::bail!("the closing +++ line is missing")
-    }
-}
-
-impl Encode for Article {
-    type Error = anyhow::Error;
-
-    fn encode(self) -> anyhow::Result<Vec<u8>> {
-        let mut bytes = b"+++\n".to_vec();
-        bytes.extend(Toml(self.frontmatter).encode()?);
-        bytes.extend_from_slice(b"+++\n");
-        bytes.extend(self.body.encode()?);
-        Ok(bytes)
-    }
-}
-
-fn change_title(input: Vec<u8>, title: String) -> anyhow::Result<Vec<u8>> {
-    let mut article = Article::decode(input)?;
-    article.frontmatter.title = title;
-    article.encode()
-}
-
-fn main() -> anyhow::Result<()> {
-    for newline in ["\n", "\r\n"] {
-        let body = format!("# Description{newline}{newline}Text.{newline}");
-        let input = format!("+++{newline}title = \"Old\"{newline}+++{newline}{body}");
-        let output = change_title(input.into_bytes(), "New".to_owned())?;
-        let article = Article::decode(output)?;
-        assert_eq!(article.frontmatter.title, "New");
-        assert_eq!(article.body.as_ref(), body);
-    }
-    Ok(())
-}
-```
-
-- `decode` and `encode` are synchronous. Do only the conversion in them,
-  without I/O: in `write` and `edit`, `fairway-fs` calls them while it holds
-  the file's lock.
-- You choose the error type. The built-in formats use `codec::Error`, the
-  example above uses `anyhow::Error`, and a format that cannot fail uses
-  `Infallible`.
-- To work with `fairway-fs`, the type must be `Send + 'static`, and its error
-  must be `Send` and convert into `Box<dyn Error + Send + Sync>`. For example,
-  `anyhow::Error`, `io::Error`, `codec::Error`, and `Infallible` all do.
-- A panic in `decode` or `encode` called by `fairway-fs` resumes in the task
-  that awaits `read`, `write`, or `edit`, and the file is left unchanged.
-
-## API documentation
-
-The full description of the types, traits, and errors is in the crate
-documentation. To open it locally, run
-
-```sh
-cargo doc -p fairway-codec --open
-```
-
-Published versions are available on [docs.rs](https://docs.rs/fairway-codec).
+No partial conversion result is returned on error.
