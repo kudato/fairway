@@ -41,6 +41,7 @@ fn cli_guides() {
     let cli = root.join("core/fairway-cli");
     let filesystem = root.join("core/fairway-fs");
     let config = root.join("core/fairway-config");
+    let catalog = root.join("core/fairway-catalog");
     let target = root.join("target/cli-doc-tests");
     fs::create_dir_all(&target).unwrap();
 
@@ -86,6 +87,7 @@ path = "src/main.rs"
 fairway-cli = {{ path = {cli:?} }}
 fairway-fs = {{ path = {filesystem:?} }}
 fairway-config = {{ path = {config:?} }}
+fairway-catalog = {{ path = {catalog:?} }}
 clap = {{ version = "4", features = ["derive"] }}
 tokio = {{ version = "1.26", features = ["rt", "rt-multi-thread", "signal", "sync", "time", "macros", "net"] }}
 tokio-util = "0.7"

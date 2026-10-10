@@ -1,29 +1,20 @@
-use std::{error, fmt, io, sync::Arc};
+use std::{error, fmt};
 
-/// A catalog initialization, access, compression, or decompression failure.
+#[cfg(feature = "build")]
+use std::io;
+
+/// An invalid address, or every problem found by [`initialize`](crate::initialize).
 ///
-/// The diagnostic identifies the entry or registration when applicable.
-/// Compression and decompression errors retain their underlying cause through
-/// [`source`](error::Error::source).
+/// Messages show full addresses, `namespace/address`. An initialization error
+/// lists one problem per line, with the declarations and `embed!` calls involved.
 #[derive(Clone, Debug)]
 pub struct Error {
     message: String,
-    source: Option<Arc<io::Error>>,
 }
 
 impl Error {
-    pub(crate) fn message(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-            source: None,
-        }
-    }
-
-    pub(crate) fn with_source(message: impl Into<String>, source: io::Error) -> Self {
-        Self {
-            message: message.into(),
-            source: Some(Arc::new(source)),
-        }
+    pub(crate) fn new(message: String) -> Self {
+        Self { message }
     }
 }
 
@@ -33,43 +24,48 @@ impl fmt::Display for Error {
     }
 }
 
-impl error::Error for Error {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        self.source
-            .as_deref()
-            .map(|source| source as &(dyn error::Error + 'static))
-    }
-}
+impl error::Error for Error {}
 
-/// A failure to compress builtin data or write its build artifacts.
+/// A failure to check a builtin table or to write its build artifacts.
 ///
 /// File operation errors identify the affected path and retain the original
 /// I/O error through [`source`](error::Error::source).
 #[cfg(feature = "build")]
 #[derive(Debug)]
-pub struct BuildError(Error);
+pub struct BuildError {
+    message: String,
+    source: Option<io::Error>,
+}
 
 #[cfg(feature = "build")]
 impl BuildError {
-    pub(crate) fn message(message: impl Into<String>) -> Self {
-        Self(Error::message(message))
+    pub(crate) fn new(message: String) -> Self {
+        Self {
+            message,
+            source: None,
+        }
     }
 
-    pub(crate) fn with_source(message: impl Into<String>, source: io::Error) -> Self {
-        Self(Error::with_source(message, source))
+    pub(crate) fn with_source(message: String, source: io::Error) -> Self {
+        Self {
+            message,
+            source: Some(source),
+        }
     }
 }
 
 #[cfg(feature = "build")]
 impl fmt::Display for BuildError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(formatter)
+        formatter.write_str(&self.message)
     }
 }
 
 #[cfg(feature = "build")]
 impl error::Error for BuildError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        self.0.source()
+        self.source
+            .as_ref()
+            .map(|source| source as &(dyn error::Error + 'static))
     }
 }

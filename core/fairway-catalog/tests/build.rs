@@ -1,8 +1,12 @@
-//! Build artifacts and macro registration exercised through consumer crates.
+//! Builtin tables built and embedded through an owner's wrappers.
 
 #![cfg(feature = "build")]
 
-use std::{fs, path::Path, process::Command};
+use std::{
+    fs,
+    path::Path,
+    process::{Command, Output},
+};
 
 #[test]
 fn build_and_embed_across_consumers_and_rebuilds() {
@@ -11,6 +15,14 @@ fn build_and_embed_across_consumers_and_rebuilds() {
     let files = [
         ("Cargo.toml", include_str!("fixtures/Cargo.toml")),
         (
+            "owner/Cargo.toml",
+            include_str!("fixtures/owner/Cargo.toml"),
+        ),
+        (
+            "owner/src/lib.rs",
+            include_str!("fixtures/owner/src/lib.rs"),
+        ),
+        (
             "first/Cargo.toml",
             include_str!("fixtures/first/Cargo.toml"),
         ),
@@ -18,6 +30,10 @@ fn build_and_embed_across_consumers_and_rebuilds() {
         (
             "first/contents.txt",
             include_str!("fixtures/first/contents.txt"),
+        ),
+        (
+            "first/glossary.txt",
+            include_str!("fixtures/first/glossary.txt"),
         ),
         (
             "first/src/lib.rs",
@@ -50,15 +66,30 @@ fn build_and_embed_across_consumers_and_rebuilds() {
     }
 
     build(workspace, false);
-    run(workspace, false, "builtin commit\n");
+    assert_eq!(run(workspace, false), "builtin commit\ngit,rust\n");
+    assert_eq!(
+        glossary_files(workspace),
+        ["0000000000000000", "0000000000000001", "entries.rs"]
+    );
 
+    // The shorter glossary leaves no files of the previous one.
     fs::write(workspace.join("first/contents.txt"), "changed builtin\n").unwrap();
+    fs::write(
+        workspace.join("first/glossary.txt"),
+        "git: version control\n",
+    )
+    .unwrap();
     build(workspace, false);
-    run(workspace, false, "changed builtin\n");
+    assert_eq!(run(workspace, false), "changed builtin\ngit\n");
+    assert_eq!(
+        glossary_files(workspace),
+        ["0000000000000000", "entries.rs"]
+    );
 
     build(workspace, true);
     fs::remove_file(workspace.join("first/contents.txt")).unwrap();
-    run(workspace, true, "changed builtin\n");
+    fs::remove_file(workspace.join("first/glossary.txt")).unwrap();
+    assert_eq!(run(workspace, true), "changed builtin\ngit\n");
 }
 
 fn build(workspace: &Path, release: bool) {
@@ -74,16 +105,32 @@ fn build(workspace: &Path, release: bool) {
     checked(&mut command);
 }
 
-fn run(workspace: &Path, release: bool, expected: &str) {
+fn run(workspace: &Path, release: bool) -> String {
     let profile = if release { "release" } else { "debug" };
     let executable = workspace.join("target").join(profile).join(format!(
         "catalog-fixture-app{}",
         std::env::consts::EXE_SUFFIX
     ));
-    checked(Command::new(executable).arg(expected));
+    String::from_utf8(checked(&mut Command::new(executable)).stdout).unwrap()
 }
 
-fn checked(command: &mut Command) {
+/// Files of the glossary table in the first crate's debug `OUT_DIR`.
+fn glossary_files(workspace: &Path) -> Vec<String> {
+    let directories: Vec<_> = fs::read_dir(workspace.join("target/debug/build"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path().join("out/fairway-catalog/glossary"))
+        .filter(|directory| directory.is_dir())
+        .collect();
+    assert_eq!(directories.len(), 1, "{directories:?}");
+    let mut files: Vec<_> = fs::read_dir(&directories[0])
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    files.sort();
+    files
+}
+
+fn checked(command: &mut Command) -> Output {
     let output = command.output().expect("start fixture command");
     assert!(
         output.status.success(),
@@ -92,4 +139,5 @@ fn checked(command: &mut Command) {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    output
 }

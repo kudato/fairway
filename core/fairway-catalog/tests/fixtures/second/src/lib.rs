@@ -1,1 +1,1 @@
-catalog::embed!();
+owner::embed_skills!();

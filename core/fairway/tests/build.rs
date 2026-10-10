@@ -16,6 +16,7 @@ impl Fixture {
         let cli = core.join("fairway-cli");
         let filesystem = core.join("fairway-fs");
         let config = core.join("fairway-config");
+        let catalog = core.join("fairway-catalog");
         let target = core.parent().unwrap().join("target");
         fs::create_dir_all(&target).unwrap();
         let fixture = Self {
@@ -75,6 +76,7 @@ edition = "2024"
 fairway-cli = {{ path = {cli:?} }}
 fairway-fs = {{ path = {filesystem:?} }}
 fairway-config = {{ path = {config:?} }}
+fairway-catalog = {{ path = {catalog:?} }}
 clap.workspace = true
 anyhow.workspace = true
 tokio = {{ version = "1.26", features = ["rt", "rt-multi-thread", "signal", "sync", "time", "macros"] }}

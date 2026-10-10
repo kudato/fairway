@@ -1,98 +1,122 @@
-//! Runtime access, literal addresses, masks, and concurrent replacement.
+//! The lifecycle of namespaces that start empty or with the owner's values.
 
-use fairway_catalog::{get, initialize, list, put};
-use std::{sync::Barrier, thread};
+use std::{panic, sync::Barrier, thread};
 
+use fairway_catalog::initialize;
+
+fairway_catalog::namespace!(STATE: String, "state");
+fairway_catalog::namespace!(CONFIG: u16, "config", initial = defaults);
+
+fn defaults() -> Vec<(String, u16)> {
+    vec![
+        ("http/workers".to_owned(), 4),
+        ("http/port".to_owned(), 8080),
+    ]
+}
+
+// One test: the namespaces and their initialization are shared by the process.
 #[test]
-fn runtime_catalog_lifecycle() {
-    assert!(get("before-initialization").is_err());
-    assert!(list("*").is_err());
-    assert!(put("before-initialization", b"must not be stored").is_err());
+fn catalog_lifecycle() {
+    operations_panic_before_initialization();
 
     thread::scope(|scope| {
         for _ in 0..8 {
             scope.spawn(|| initialize().unwrap());
         }
     });
-    assert!(list("*").unwrap().is_empty());
-    assert_eq!(get("missing").unwrap(), None);
+
+    an_empty_namespace();
+    the_owners_values();
+    invalid_addresses_change_nothing();
+    concurrent_replacements();
+
+    initialize().unwrap();
+    assert_eq!(CONFIG.list("*"), ["http/port"]);
+    assert_eq!(CONFIG.get("http/port"), Some(80));
+}
+
+fn operations_panic_before_initialization() {
+    for operation in [
+        (|| drop(STATE.get("a"))) as fn(),
+        || drop(STATE.put("a", String::new())),
+        || drop(STATE.delete("a")),
+        || drop(STATE.list("*")),
+    ] {
+        assert!(panic::catch_unwind(operation).is_err());
+    }
+}
+
+fn an_empty_namespace() {
+    assert!(STATE.list("*").is_empty());
+    assert_eq!(STATE.get("missing"), None);
 
     for address in [
-        "skill/git/commit",
-        "skill/git/hooks/pre-commit",
-        "resource/git/convention",
-        "skill/git",
-        "skill/rust/check",
-        "Skill/git/commit",
+        "git/commit",
+        "git/hooks/pre-commit",
+        "git",
+        "rust/check",
+        "Git/commit",
+        "путь/задача ✓",
     ] {
-        put(address, address.as_bytes()).unwrap();
+        assert_eq!(STATE.put(address, address.to_owned()).unwrap(), None);
     }
+    assert_eq!(STATE.list("git/*"), ["git/commit", "git/hooks/pre-commit"]);
+    assert_eq!(STATE.list("*/commit"), ["Git/commit", "git/commit"]);
+    assert_eq!(STATE.list("git"), ["git"]);
+    assert_eq!(STATE.list("*задача*"), ["путь/задача ✓"]);
+    assert!(STATE.list("missing/*").is_empty());
+    assert_eq!(STATE.list("*").len(), 6);
 
-    assert_eq!(
-        list("skill/git/*").unwrap(),
-        ["skill/git/commit", "skill/git/hooks/pre-commit"]
-    );
-    assert_eq!(
-        list("skill/*").unwrap(),
-        [
-            "skill/git",
-            "skill/git/commit",
-            "skill/git/hooks/pre-commit",
-            "skill/rust/check"
-        ]
-    );
-    assert_eq!(list("*/git").unwrap(), ["skill/git"]);
-    assert_eq!(
-        list("*/git/*").unwrap(),
-        [
-            "Skill/git/commit",
-            "resource/git/convention",
-            "skill/git/commit",
-            "skill/git/hooks/pre-commit"
-        ]
-    );
-    assert!(list("missing/*").unwrap().is_empty());
-    assert_eq!(list("skill/git").unwrap(), ["skill/git"]);
+    let previous = STATE.put("git/commit", "replacement".to_owned()).unwrap();
+    assert_eq!(previous.as_deref(), Some("git/commit"));
+    assert_eq!(STATE.get("git/commit").as_deref(), Some("replacement"));
+    let removed = STATE.delete("git/commit").unwrap();
+    assert_eq!(removed.as_deref(), Some("replacement"));
+    assert_eq!(STATE.delete("git/commit").unwrap(), None);
+    assert_eq!(STATE.get("git/commit"), None);
+    assert_eq!(STATE.list("git/*"), ["git/hooks/pre-commit"]);
+}
 
-    let mut previously_read = get("skill/git/commit").unwrap().unwrap();
-    let previous_list = list("skill/git/*").unwrap();
-    put("skill/git/commit", b"replacement").unwrap();
-    put("skill/git/rebase", b"new entry").unwrap();
-    assert_eq!(previously_read, b"skill/git/commit");
-    assert_eq!(previous_list.len(), 2);
-    previously_read.fill(0);
-    assert_eq!(get("skill/git/commit").unwrap().unwrap(), b"replacement");
-    initialize().unwrap();
-    assert_eq!(get("skill/git/commit").unwrap().unwrap(), b"replacement");
+fn the_owners_values() {
+    assert_eq!(CONFIG.list("*"), ["http/port", "http/workers"]);
+    assert_eq!(CONFIG.get("http/port"), Some(8080));
+    assert_eq!(CONFIG.put("http/port", 80).unwrap(), Some(8080));
+    assert_eq!(CONFIG.delete("http/workers").unwrap(), Some(4));
+    assert_eq!(CONFIG.list("*"), ["http/port"]);
+}
 
-    let binary: Vec<u8> = (0..=255).cycle().take(100_000).collect();
-    put("binary", &binary).unwrap();
-    assert_eq!(get("binary").unwrap(), Some(binary));
-    put("empty", b"").unwrap();
-    assert_eq!(get("empty").unwrap(), Some(Vec::new()));
-
-    for address in ["", "путь/задача", "a//b", "a/./b", "a/b", "literal/?[x]\\"] {
-        put(address, address.as_bytes()).unwrap();
-        assert_eq!(get(address).unwrap(), Some(address.as_bytes().to_vec()));
-        assert_eq!(list(address).unwrap(), [address]);
+fn invalid_addresses_change_nothing() {
+    let before = STATE.list("*");
+    for (address, error) in [
+        ("", "address \"state/\" has an empty part"),
+        ("/git", "address \"state//git\" has an empty part"),
+        ("git/", "address \"state/git/\" has an empty part"),
+        (
+            "git//commit",
+            "address \"state/git//commit\" has an empty part",
+        ),
+        ("git/*", "address \"state/git/*\" contains `*`"),
+    ] {
+        let put = STATE.put(address, String::new()).unwrap_err();
+        assert_eq!(put.to_string(), error);
+        assert_eq!(STATE.delete(address).unwrap_err().to_string(), error);
     }
-
-    concurrent_replacements();
+    assert_eq!(STATE.list("*"), before);
 }
 
 fn concurrent_replacements() {
-    let first = vec![0x11; 32 * 1024];
-    let second = vec![0xee; 48 * 1024];
-    put("concurrent/value", &first).unwrap();
+    let first = "first".repeat(1024);
+    let second = "second".repeat(1024);
+    STATE.put("concurrent/value", first.clone()).unwrap();
     let barrier = Barrier::new(4);
 
     thread::scope(|scope| {
-        for writer in [&first, &second] {
+        for value in [&first, &second] {
             let barrier = &barrier;
             scope.spawn(move || {
                 barrier.wait();
                 for _ in 0..64 {
-                    put("concurrent/value", writer).unwrap();
+                    STATE.put("concurrent/value", value.clone()).unwrap();
                 }
             });
         }
@@ -101,9 +125,9 @@ fn concurrent_replacements() {
             scope.spawn(move || {
                 barrier.wait();
                 for _ in 0..128 {
-                    let bytes = get("concurrent/value").unwrap().unwrap();
-                    assert!(bytes == *first || bytes == *second);
-                    assert_eq!(list("concurrent/*").unwrap(), ["concurrent/value"]);
+                    let value = STATE.get("concurrent/value").unwrap();
+                    assert!(value == *first || value == *second);
+                    assert_eq!(STATE.list("concurrent/*"), ["concurrent/value"]);
                 }
             });
         }

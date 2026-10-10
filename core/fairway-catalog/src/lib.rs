@@ -1,186 +1,170 @@
-//! A mutable catalog of opaque bytes, addressed by strings.
+//! Global in-memory namespaces of values, with builtin initial data.
 //!
-//! Consumers supply builtin entries through `build` in their build scripts
-//! (with the `build` feature) and include them with [`embed!`] in their crate.
-//! The application calls [`initialize`] before accessing the catalog.
+//! A crate that owns a namespace declares it with [`namespace!`] and keeps the
+//! static private: other crates use the owner's API. A namespace holds values
+//! of the owner's type by address, such as `git/commit`; together with the
+//! namespace name this is the full address `skill/git/commit`. Fairway calls
+//! [`initialize`] at startup, which checks every linked namespace and fills
+//! all of them or none.
 //!
-//! Initialization borrows the embedded compressed blocks. [`put`] adds or
-//! replaces an entry in the same index; [`get`] returns its original bytes.
-//! Runtime changes live in memory for the remainder of the process.
+//! A namespace starts empty, receives the builtin tables that crates prepare
+//! with `build` in their build scripts (the `build` feature) and include with
+//! [`embed!`], or receives the values of the owner's function. Values are
+//! stored as they are: encoding, if any, is up to the owner.
 //!
 //! ```
+//! fairway_catalog::namespace!(NOTES: String, "doc-notes");
+//!
 //! fairway_catalog::initialize()?;
-//! fairway_catalog::put("example/message", b"hello")?;
-//! assert_eq!(fairway_catalog::get("example/message")?, Some(b"hello".to_vec()));
-//! assert_eq!(fairway_catalog::list("example/*")?, ["example/message"]);
+//! NOTES.put("todo/first", "write tests".to_owned())?;
+//! assert_eq!(NOTES.get("todo/first").as_deref(), Some("write tests"));
+//! assert_eq!(NOTES.list("todo/*"), ["todo/first"]);
 //! # Ok::<(), fairway_catalog::Error>(())
 //! ```
 
+mod address;
 #[cfg(feature = "build")]
 mod build;
-mod compression;
 mod error;
+mod namespace;
 mod pattern;
 mod registry;
 
-use std::{
-    borrow::Cow,
-    collections::BTreeMap,
-    sync::{Arc, OnceLock, RwLock},
-};
+use std::sync::OnceLock;
 
 #[cfg(feature = "build")]
 pub use build::build;
 #[cfg(feature = "build")]
 pub use error::BuildError;
 pub use error::Error;
+pub use namespace::Namespace;
 
-type Entries = BTreeMap<Cow<'static, str>, Content>;
+// The first result is kept: a failure stays, and filled namespaces keep their
+// later changes.
+static INITIALIZED: OnceLock<Result<(), Error>> = OnceLock::new();
 
-static CATALOG: OnceLock<Result<RwLock<Entries>, Error>> = OnceLock::new();
-
-#[derive(Clone)]
-enum Content {
-    Builtin(&'static [u8]),
-    Owned(Arc<Vec<u8>>),
-}
-
-impl Content {
-    fn bytes(&self) -> &[u8] {
-        match self {
-            Self::Builtin(bytes) => bytes,
-            Self::Owned(bytes) => bytes,
-        }
-    }
-}
-
-/// Initializes the catalog from all linked builtin tables.
+/// Checks every linked namespace and builtin table, then fills all namespaces.
 ///
-/// The index borrows builtin addresses and compressed bytes. Initialization
-/// neither copies nor decompresses their contents. Repeated and concurrent
-/// calls preserve the initialized catalog, including subsequent runtime changes.
+/// Fairway calls this at startup, before any namespace is used; owners' tests
+/// call it themselves. Repeated and concurrent calls return the result of the
+/// first one and keep the changes made since.
 ///
 /// # Errors
 ///
-/// Duplicate builtin addresses fail initialization, with both registration
-/// locations in the diagnostic. No partial catalog is published. The failure
-/// is retained for subsequent calls.
+/// Returns every problem at once: a repeated namespace name, builtin data for
+/// an unknown namespace or for one declared without `builtin`, an invalid
+/// address, or an address repeated in a namespace, with the declarations and
+/// [`embed!`] calls involved. No namespace is filled then.
 pub fn initialize() -> Result<(), Error> {
-    CATALOG
-        .get_or_init(|| registry::collect(&registry::BUILTINS).map(RwLock::new))
-        .as_ref()
-        .map(|_| ())
-        .map_err(Clone::clone)
-}
-
-/// Returns an entry's decompressed bytes, or `None` if its address is absent.
-///
-/// Addresses are matched literally, including case. The returned buffer belongs
-/// to the caller and remains valid after the entry changes. A concurrent update
-/// yields either the entire old contents or the entire new contents.
-///
-/// # Errors
-///
-/// Returns an error if initialization has not succeeded, the index lock is
-/// poisoned, or the selected entry cannot be decompressed.
-pub fn get(address: &str) -> Result<Option<Vec<u8>>, Error> {
-    let content = catalog()?
-        .read()
-        .map_err(|_| Error::message("catalog index lock is poisoned"))?
-        .get(address)
-        .cloned();
-
-    // Own the selected block while decoding, so writes can proceed meanwhile.
-    content
-        .map(|content| {
-            compression::decompress(content.bytes()).map_err(|source| {
-                Error::with_source(
-                    format!("cannot decompress catalog entry {address:?}"),
-                    source,
-                )
-            })
+    INITIALIZED
+        .get_or_init(|| {
+            registry::initialize(
+                &registry::FAIRWAY_CATALOG_NAMESPACES,
+                &registry::FAIRWAY_CATALOG_BUILTINS,
+            )
         })
-        .transpose()
+        .clone()
 }
 
-/// Adds an entry or replaces all of its contents.
+/// Declares `pub(crate) static NAME: Namespace<V>` and registers it by name.
 ///
-/// The catalog compresses the supplied bytes before replacing the entry.
-/// Replacement is atomic and a failed operation leaves the previous entry
-/// intact. Replacing a builtin entry does not create a fallback to that entry.
+/// The name is one part of a full address: it is not empty and contains
+/// neither `/` nor `*`, otherwise the declaration does not compile. A name
+/// declared twice in the linked crates is reported by [`initialize`]. The
+/// parameter after the name chooses how `initialize` fills the namespace:
 ///
-/// # Errors
+/// - none: the namespace starts empty;
+/// - `builtin`: it receives the tables included with [`embed!`] under its
+///   name. `V` implements `From<&'static [u8]>`; `Cow<'static, [u8]>` borrows
+///   the embedded bytes without copying them;
+/// - `initial = function`: it receives the values returned by a
+///   `fn() -> Vec<(String, V)>`.
 ///
-/// Returns an error if initialization has not succeeded, compression fails,
-/// or the index lock is poisoned.
-pub fn put(address: &str, content: &[u8]) -> Result<(), Error> {
-    let catalog = catalog()?;
-    let compressed = compression::compress(content).map_err(|source| {
-        Error::with_source(format!("cannot compress catalog entry {address:?}"), source)
-    })?;
-    let content = Content::Owned(Arc::new(compressed));
-
-    catalog
-        .write()
-        .map_err(|_| Error::message("catalog index lock is poisoned"))?
-        .insert(Cow::Owned(address.to_owned()), content);
-    Ok(())
+/// ```
+/// use std::borrow::Cow;
+///
+/// fn defaults() -> Vec<(String, u16)> {
+///     vec![("http/port".to_owned(), 8080)]
+/// }
+///
+/// fairway_catalog::namespace!(STATE: String, "doc-state");
+/// fairway_catalog::namespace!(SKILLS: Cow<'static, [u8]>, "doc-skill", builtin);
+/// fairway_catalog::namespace!(CONFIG: u16, "doc-config", initial = defaults);
+/// ```
+#[macro_export]
+macro_rules! namespace {
+    ($id:ident: $ty:ty, $name:literal $(,)?) => {
+        $crate::__namespace!($id, $ty, $crate::Namespace::new($name));
+    };
+    ($id:ident: $ty:ty, $name:literal, builtin $(,)?) => {
+        $crate::__namespace!($id, $ty, $crate::Namespace::builtin($name));
+    };
+    ($id:ident: $ty:ty, $name:literal, initial = $initial:expr $(,)?) => {
+        $crate::__namespace!($id, $ty, $crate::Namespace::initial($name, $initial));
+    };
 }
 
-/// Returns a lexicographically sorted snapshot of addresses matching `pattern`.
-///
-/// `*` matches zero or more characters, including `/`. All other characters
-/// are literal. Matching covers the entire address and is case-sensitive.
-/// `"*"` selects all entries; `"skill/git/*"` selects every address beginning
-/// with `"skill/git/"`, regardless of the number of further slashes.
-///
-/// No matches produce an empty vector. Listing does not decompress contents.
-///
-/// # Errors
-///
-/// Returns an error if initialization has not succeeded or the index lock
-/// is poisoned.
-pub fn list(pattern: &str) -> Result<Vec<String>, Error> {
-    let pattern = pattern::Pattern::new(pattern);
-    Ok(catalog()?
-        .read()
-        .map_err(|_| Error::message("catalog index lock is poisoned"))?
-        .keys()
-        .filter(|address| pattern.matches(address))
-        .map(|address| address.to_string())
-        .collect())
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __namespace {
+    ($id:ident, $ty:ty, $namespace:expr) => {
+        pub(crate) static $id: $crate::Namespace<$ty> = $namespace;
+
+        const _: () = {
+            #[$crate::__private::linkme::distributed_slice(
+                $crate::__private::FAIRWAY_CATALOG_NAMESPACES
+            )]
+            #[linkme(crate = $crate::__private::linkme)]
+            #[allow(
+                unsafe_code,
+                reason = "linkme places the declaration in a linker section"
+            )]
+            static REGISTRATION: $crate::__private::Registration =
+                $crate::__private::Registration::new(
+                    &$id,
+                    ::core::concat!(
+                        ::core::module_path!(),
+                        " (",
+                        ::core::file!(),
+                        ":",
+                        ::core::line!(),
+                        ")"
+                    ),
+                );
+        };
+    };
 }
 
-fn catalog() -> Result<&'static RwLock<Entries>, Error> {
-    CATALOG
-        .get()
-        .ok_or_else(|| Error::message("catalog is not initialized"))?
-        .as_ref()
-        .map_err(Clone::clone)
-}
-
-/// Embeds the builtin table prepared by this crate's build script.
+/// Includes the builtin table that this crate's build script prepared for a
+/// namespace.
 ///
-/// Call once in the consumer's `src/lib.rs` or `src/main.rs`, after using
-/// `build` from its `build.rs`. The macro registers the table through
-/// `linkme`; the consumer needs no direct dependency on `linkme`.
-/// The application must link the consumer crate for its entries to be present.
+/// The build script calls `build` with the same namespace name. A crate can
+/// embed tables into several namespaces, one call per namespace. The name is a
+/// literal, because the macro builds the path of the table from it; an invalid
+/// name does not compile. The namespace must be declared with `builtin`, which
+/// [`initialize`] checks. Owners wrap this macro and `build` for the crates
+/// that embed into their namespaces.
 #[macro_export]
 macro_rules! embed {
-    () => {
+    ($namespace:literal $(,)?) => {
         const _: () = {
-            #[$crate::__private::linkme::distributed_slice($crate::__private::BUILTINS)]
+            #[$crate::__private::linkme::distributed_slice(
+                $crate::__private::FAIRWAY_CATALOG_BUILTINS
+            )]
             #[linkme(crate = $crate::__private::linkme)]
             #[allow(
                 unsafe_code,
                 reason = "linkme places the builtin table in a linker section"
             )]
-            static REGISTRATION: $crate::__private::Builtin = $crate::__private::Builtin {
-                entries: ::core::include!(::core::concat!(
+            static REGISTRATION: $crate::__private::Builtin = $crate::__private::Builtin::new(
+                $namespace,
+                ::core::include!(::core::concat!(
                     ::core::env!("OUT_DIR"),
-                    "/fairway-catalog/entries.rs"
+                    "/fairway-catalog/",
+                    $namespace,
+                    "/entries.rs"
                 )),
-                source: ::core::concat!(
+                ::core::concat!(
                     ::core::module_path!(),
                     " (",
                     ::core::file!(),
@@ -188,14 +172,16 @@ macro_rules! embed {
                     ::core::line!(),
                     ")"
                 ),
-            };
+            );
         };
     };
 }
 
-/// Implementation support for [`embed!`].
+/// Macro support, not part of the owner API.
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::registry::{BUILTINS, Builtin};
+    pub use crate::registry::{
+        Builtin, FAIRWAY_CATALOG_BUILTINS, FAIRWAY_CATALOG_NAMESPACES, Registration,
+    };
     pub use linkme;
 }

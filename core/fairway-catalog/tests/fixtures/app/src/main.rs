@@ -1,38 +1,37 @@
+use std::borrow::Cow;
+
 use catalog_fixture_first as _;
 use catalog_fixture_second as _;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let expected = std::env::args().nth(1).expect("expected builtin contents");
+    // Fairway's part: the catalog is initialized at startup.
     catalog::initialize()?;
-    assert_eq!(
-        catalog::get("skill/git/commit")?,
-        Some(expected.into_bytes())
-    );
-    assert_eq!(
-        catalog::get("resource/git/convention")?,
-        Some(b"convention".to_vec())
-    );
-    assert_eq!(catalog::get("empty")?, Some(Vec::new()));
-    assert_eq!(
-        catalog::get("literal/\"quote\"\\path\n\0/✓")?,
-        Some(vec![0, 255, 128, 0])
-    );
-    assert_eq!(
-        catalog::get("../../escape.rs")?,
-        Some(b"opaque address".to_vec())
-    );
-    assert_eq!(
-        catalog::list("skill/git/*")?,
-        ["skill/git/commit", "skill/git/hooks/pre-commit"]
-    );
 
-    catalog::put("skill/git/commit", b"replacement")?;
-    catalog::put("runtime", b"added")?;
+    let Some(Cow::Borrowed(commit)) = owner::skill("git/commit") else {
+        panic!("a builtin value borrows the embedded bytes");
+    };
+    assert_eq!(owner::skill("empty").as_deref(), Some(&b""[..]));
+    assert_eq!(
+        owner::skill("literal/\"quote\"\\path\n\0/✓").as_deref(),
+        Some(&[0, 255, 128, 0][..])
+    );
+    assert_eq!(
+        owner::skill("../../escape.rs").as_deref(),
+        Some(&b"opaque address"[..])
+    );
+    assert_eq!(
+        owner::skills("git/*"),
+        ["git/commit", "git/hooks/pre-commit"]
+    );
+    assert_eq!(owner::term("git").as_deref(), Some(&b"version control"[..]));
+    print!("{}", std::str::from_utf8(commit)?);
+    println!("{}", owner::terms().join(","));
+
+    owner::put_skill("git/commit", b"replacement".to_vec())?;
     catalog::initialize()?;
     assert_eq!(
-        catalog::get("skill/git/commit")?,
-        Some(b"replacement".to_vec())
+        owner::skill("git/commit").as_deref(),
+        Some(&b"replacement"[..])
     );
-    assert_eq!(catalog::get("runtime")?, Some(b"added".to_vec()));
     Ok(())
 }

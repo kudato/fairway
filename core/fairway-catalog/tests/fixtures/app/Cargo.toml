@@ -6,5 +6,6 @@ publish = false
 
 [dependencies]
 catalog.workspace = true
+owner.workspace = true
 catalog-fixture-first = { path = "../first" }
 catalog-fixture-second = { path = "../second" }

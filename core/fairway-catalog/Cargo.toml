@@ -1,6 +1,6 @@
 [package]
 name = "fairway-catalog"
-description = "Mutable in-memory catalog with compressed builtin data for Fairway"
+description = "Global in-memory namespaces with builtin initial data for Fairway"
 documentation = "https://docs.rs/fairway-catalog"
 readme = "../../README.md"
 version.workspace = true
@@ -19,7 +19,6 @@ build = []
 
 [dependencies]
 linkme.workspace = true
-zstd.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

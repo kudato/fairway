@@ -38,4 +38,11 @@ mod tests {
     fn config_registry_is_valid() {
         fairway_config::validate_registry();
     }
+
+    #[test]
+    fn catalog_registry_is_valid() {
+        if let Err(error) = fairway_catalog::initialize() {
+            panic!("{error}");
+        }
+    }
 }

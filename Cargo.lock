@@ -376,6 +376,7 @@ dependencies = [
  "anyhow",
  "axum",
  "clap",
+ "fairway-catalog",
  "fairway-cli",
  "fairway-config",
  "fairway-fs",
@@ -393,7 +394,6 @@ version = "0.0.2"
 dependencies = [
  "linkme",
  "tempfile",
- "zstd",
 ]
 
 [[package]]

@@ -1,30 +1,74 @@
-//! Lazy builtin decoding and replacement of an unreadable builtin entry.
+//! Builtin tables of several crates fill their namespaces without copying.
 
-use fairway_catalog::{__private, get, initialize, list, put};
-use std::error::Error as _;
+use std::{borrow::Cow, ptr};
 
-#[__private::linkme::distributed_slice(__private::BUILTINS)]
+use fairway_catalog::{__private, initialize};
+
+fairway_catalog::namespace!(SKILLS: Cow<'static, [u8]>, "skill", builtin);
+fairway_catalog::namespace!(GLOSSARY: Cow<'static, [u8]>, "glossary", builtin);
+
+static COMMIT: [u8; 6] = *b"commit";
+
+// Two crates embed into one namespace; the second one also into another.
+#[__private::linkme::distributed_slice(__private::FAIRWAY_CATALOG_BUILTINS)]
 #[linkme(crate = __private::linkme)]
-#[allow(unsafe_code)]
-static BUILTIN: __private::Builtin = __private::Builtin {
-    entries: &[("corrupt", b"invalid compressed bytes")],
-    source: "corrupt-entry fixture",
-};
+#[allow(unsafe_code, reason = "linkme places the table in a linker section")]
+static FIRST: __private::Builtin = __private::Builtin::new(
+    "skill",
+    &[
+        ("git/commit", &COMMIT),
+        ("git/commit/convention", b"convention"),
+    ],
+    "first crate",
+);
+
+#[__private::linkme::distributed_slice(__private::FAIRWAY_CATALOG_BUILTINS)]
+#[linkme(crate = __private::linkme)]
+#[allow(unsafe_code, reason = "linkme places the table in a linker section")]
+static SECOND_SKILLS: __private::Builtin =
+    __private::Builtin::new("skill", &[("rust/check", b"check")], "second crate");
+
+#[__private::linkme::distributed_slice(__private::FAIRWAY_CATALOG_BUILTINS)]
+#[linkme(crate = __private::linkme)]
+#[allow(unsafe_code, reason = "linkme places the table in a linker section")]
+static SECOND_GLOSSARY: __private::Builtin =
+    __private::Builtin::new("glossary", &[("git", b"version control")], "second crate");
 
 #[test]
-fn corrupt_contents_do_not_prevent_initialization_listing_or_replacement() {
+fn builtin_tables_are_the_initial_values() {
     initialize().unwrap();
-    assert_eq!(list("*").unwrap(), ["corrupt"]);
-    assert_eq!(get("absent").unwrap(), None);
+    assert_eq!(
+        SKILLS.list("*"),
+        ["git/commit", "git/commit/convention", "rust/check"]
+    );
+    assert_eq!(GLOSSARY.list("*"), ["git"]);
+    assert_eq!(
+        GLOSSARY.get("git").as_deref(),
+        Some(&b"version control"[..])
+    );
 
-    let error = get("corrupt").unwrap_err();
-    assert!(error.to_string().contains("corrupt"));
-    assert!(error.source().is_some());
+    let Some(Cow::Borrowed(commit)) = SKILLS.get("git/commit") else {
+        panic!("a builtin value borrows the embedded bytes");
+    };
+    assert!(ptr::eq(commit, &COMMIT[..]));
 
-    put("other", b"independent entry").unwrap();
-    assert_eq!(get("other").unwrap().unwrap(), b"independent entry");
-    put("corrupt", b"replacement").unwrap();
-    assert_eq!(get("corrupt").unwrap().unwrap(), b"replacement");
+    let previous = SKILLS.put("git/commit", Cow::Owned(b"replacement".to_vec()));
+    assert!(matches!(
+        previous,
+        Ok(Some(Cow::Borrowed(bytes))) if ptr::eq(bytes, &COMMIT[..])
+    ));
+    assert!(matches!(
+        SKILLS.get("git/commit"),
+        Some(Cow::Owned(bytes)) if bytes == b"replacement"
+    ));
+    let removed = SKILLS.delete("rust/check").unwrap();
+    assert_eq!(removed.as_deref(), Some(&b"check"[..]));
+    assert_eq!(SKILLS.list("*"), ["git/commit", "git/commit/convention"]);
+
     initialize().unwrap();
-    assert_eq!(get("corrupt").unwrap().unwrap(), b"replacement");
+    assert_eq!(SKILLS.get("rust/check"), None);
+    assert_eq!(
+        SKILLS.get("git/commit").as_deref(),
+        Some(&b"replacement"[..])
+    );
 }

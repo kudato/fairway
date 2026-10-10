@@ -1,9 +1,10 @@
 [workspace]
 resolver = "3"
-members = ["first", "second", "app"]
+members = ["owner", "first", "second", "app"]
 
 [workspace.dependencies]
 catalog = { package = "fairway-catalog", path = "../.." }
+owner = { package = "catalog-fixture-owner", path = "owner" }
 
 [profile.release]
 lto = true
