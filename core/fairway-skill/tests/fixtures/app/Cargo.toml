@@ -1,0 +1,11 @@
+[package]
+name = "skill-fixture-app"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+skill.workspace = true
+skill-fixture-plugin = { path = "../plugin" }
+skill-fixture-notes = { path = "../notes" }
+tokio = { version = "1", features = ["rt"] }

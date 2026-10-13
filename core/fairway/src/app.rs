@@ -34,6 +34,9 @@ pub(crate) fn run(
             fairway_config::initialize()
                 .await
                 .context("could not load Fairway configuration")?;
+            fairway_skill::initialize()
+                .await
+                .context("could not load Fairway skills")?;
             command.run(supervisor.shutdown().into()).await
         });
         drop(runtime);

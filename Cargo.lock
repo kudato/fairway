@@ -380,6 +380,7 @@ dependencies = [
  "fairway-cli",
  "fairway-config",
  "fairway-fs",
+ "fairway-skill",
  "pulldown-cmark",
  "serde",
  "tempfile",
@@ -447,6 +448,20 @@ dependencies = [
  "unicode-normalization",
  "windows-sys",
  "xattr",
+]
+
+[[package]]
+name = "fairway-skill"
+version = "0.0.2"
+dependencies = [
+ "fairway-catalog",
+ "fairway-codec",
+ "fairway-config",
+ "fairway-fs",
+ "fairway-template",
+ "linkme",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

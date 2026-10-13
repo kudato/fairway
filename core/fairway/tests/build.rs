@@ -17,6 +17,7 @@ impl Fixture {
         let filesystem = core.join("fairway-fs");
         let config = core.join("fairway-config");
         let catalog = core.join("fairway-catalog");
+        let skill = core.join("fairway-skill");
         let target = core.parent().unwrap().join("target");
         fs::create_dir_all(&target).unwrap();
         let fixture = Self {
@@ -34,6 +35,7 @@ resolver = "3"
 [workspace.dependencies]
 fw = {{ package = "fairway-cli", path = {cli:?} }}
 cfg = {{ package = "fairway-config", path = {config:?} }}
+sk = {{ package = "fairway-skill", path = {skill:?} }}
 serde = {{ version = "1", features = ["derive"] }}
 clap = {{ version = "4", features = ["derive"] }}
 anyhow = "1"
@@ -56,6 +58,7 @@ edition = "2024"
 [dependencies]
 fw.workspace = true
 cfg.workspace = true
+sk.workspace = true
 serde.workspace = true
 clap.workspace = true
 anyhow.workspace = true
@@ -77,6 +80,7 @@ fairway-cli = {{ path = {cli:?} }}
 fairway-fs = {{ path = {filesystem:?} }}
 fairway-config = {{ path = {config:?} }}
 fairway-catalog = {{ path = {catalog:?} }}
+fairway-skill = {{ path = {skill:?} }}
 clap.workspace = true
 anyhow.workspace = true
 tokio = {{ version = "1.26", features = ["rt", "rt-multi-thread", "signal", "sync", "time", "macros"] }}
@@ -656,5 +660,28 @@ cfg::namespace!(THIRD: Settings, "third");
             output,
             "configuration namespace \"first\" is declared twice",
         );
+    }
+
+    // Skill namespaces are checked by the application as well, wherever the
+    // plugins declare them.
+    fixture.write("plugin-a/src/lib.rs", "sk::namespace!(\"writing\");\n");
+    fixture.write("plugin-b/src/lib.rs", "sk::namespace!(\"editing\");\n");
+    for release in [false, true] {
+        successful(fixture.build(release));
+        successful(fixture.check_registry(release, "skill_registry_is_valid"));
+    }
+    fixture.write("plugin-b/src/lib.rs", "sk::namespace!(\"writing\");\n");
+    for release in [false, true] {
+        successful(fixture.build(release));
+        let output = fixture.check_registry(release, "skill_registry_is_valid");
+        let diagnostic = String::from_utf8_lossy(&output.stdout).replace('\\', "/");
+        assert!(
+            diagnostic.contains(
+                "duplicate skill namespace \"writing\": \
+                 plugin_a (plugin-a/src/lib.rs:1) and plugin_b (plugin-b/src/lib.rs:1)"
+            ),
+            "{diagnostic}"
+        );
+        rejected(output, "invalid skill namespaces");
     }
 }

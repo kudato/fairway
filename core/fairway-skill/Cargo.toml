@@ -1,0 +1,32 @@
+[package]
+name = "fairway-skill"
+description = "Skills and references for Fairway plugins: embedded at build time, overridden by configuration"
+documentation = "https://docs.rs/fairway-skill"
+readme = "../../README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+build = ["fairway-catalog/build"]
+
+[dependencies]
+fairway-catalog.workspace = true
+fairway-codec.workspace = true
+fairway-config.workspace = true
+fairway-fs.workspace = true
+fairway-template.workspace = true
+linkme.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+fairway-template.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

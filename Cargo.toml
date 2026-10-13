@@ -11,6 +11,7 @@ members = [
     "core/fairway-config",
     "core/fairway-codec",
     "core/fairway-fs",
+    "core/fairway-skill",
     "core/fairway-template",
 ]
 
@@ -32,6 +33,7 @@ fairway-catalog = { version = "=0.0.2", path = "core/fairway-catalog" }
 fairway-config = { version = "=0.0.2", path = "core/fairway-config" }
 fairway-codec = { version = "=0.0.2", path = "core/fairway-codec" }
 fairway-fs = { version = "=0.0.2", path = "core/fairway-fs" }
+fairway-skill = { version = "=0.0.2", path = "core/fairway-skill" }
 fairway-template = { version = "=0.0.2", path = "core/fairway-template" }
 
 # Command declarations and registration.

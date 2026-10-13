@@ -1,0 +1,11 @@
+[package]
+name = "skill-fixture-plugin"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+skill.workspace = true
+
+[build-dependencies]
+skill = { workspace = true, features = ["build"] }
