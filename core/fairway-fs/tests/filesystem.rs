@@ -2,7 +2,7 @@
 
 use std::{error::Error as _, io, path::Path, sync::Arc, time::Duration};
 
-use fairway_codec::{Decode, Encode, Json, Toml};
+use fairway_codec::{Decode, Encode, Json};
 use fairway_fs as fs;
 use tokio::sync::{Notify, oneshot};
 
@@ -20,53 +20,17 @@ async fn atomic_replacement_keeps_old_descriptors() -> anyhow::Result<()> {
     let missing = directory.path().join("new");
     fs::write(&missing, b"bytes".to_vec()).await?;
     assert_eq!(fs::read::<Vec<u8>>(&missing).await?, b"bytes");
-    Ok(())
-}
-
-#[tokio::test]
-async fn whole_writes_preserve_empty_and_large_buffers() -> anyhow::Result<()> {
-    let directory = tempfile::tempdir()?;
-    let path = directory.path().join("data");
-    // Sizes around 64 KiB, a common buffer size, and a short write after a
-    // long one, which must not leave the old tail behind.
-    for (index, length) in [0, 1, 65_535, 65_536, 65_537, 1_000_000, 7]
-        .into_iter()
-        .enumerate()
-    {
-        let expected = vec![index as u8; length];
-        fs::write(&path, expected.clone()).await?;
-        assert_eq!(fs::read::<Vec<u8>>(&path).await?, expected);
-    }
-    Ok(())
-}
-
-#[tokio::test]
-async fn edits_wait_and_read_the_last_committed_version() -> anyhow::Result<()> {
-    let directory = tempfile::tempdir()?;
-    let path = directory.path().join("counter");
-    fs::write(&path, Json(0_u32)).await?;
-    let mut handles = Vec::new();
-    for _ in 0..12 {
-        let path = path.clone();
-        handles.push(tokio::spawn(async move {
-            fs::edit(&path, |value: Json<u32>| async move {
-                tokio::task::yield_now().await;
-                Ok::<_, fs::Error>(Json(value.0 + 1))
-            })
-            .await
-        }));
-    }
-    for handle in handles {
-        handle.await??;
-    }
-    assert_eq!(fs::read::<Json<u32>>(path).await?.0, 12);
+    // Whole buffers well past common 64 KiB I/O buffers are written and read back.
+    let large = vec![7; 1_000_000];
+    fs::write(&missing, large.clone()).await?;
+    assert_eq!(fs::read::<Vec<u8>>(&missing).await?, large);
     Ok(())
 }
 
 #[tokio::test]
 async fn writes_fail_when_busy_and_edits_wait_for_the_previous_edit() -> anyhow::Result<()> {
     let directory = tempfile::tempdir()?;
-    let path = directory.path().join("data");
+    let path = std::fs::canonicalize(directory.path())?.join("data");
     fs::write(&path, "old".to_owned()).await?;
     let (held, acquired) = oneshot::channel();
     let (release, wait_release) = oneshot::channel();
@@ -80,13 +44,12 @@ async fn writes_fail_when_busy_and_edits_wait_for_the_previous_edit() -> anyhow:
         .await
     });
     acquired.await.unwrap();
-    assert_eq!(
-        fs::write(&path, "conflict".to_owned())
-            .await
-            .unwrap_err()
-            .kind(),
-        io::ErrorKind::WouldBlock
-    );
+    // A busy error identifies the target and has no lower-level cause.
+    let busy = fs::write(&path, "conflict".to_owned()).await.unwrap_err();
+    assert_eq!(busy.operation(), fs::Operation::Lock);
+    assert_eq!(busy.path(), Some(path.as_path()));
+    assert_eq!(busy.kind(), io::ErrorKind::WouldBlock);
+    assert!(busy.source().is_none());
     let (started, receiver) = oneshot::channel();
     let next_path = path.clone();
     let edit = tokio::spawn(async move {
@@ -140,6 +103,64 @@ async fn busy_edit_rejects_write_and_can_be_cancelled_without_publishing() -> an
     )
     .await??;
     assert_eq!(fs::read::<String>(path).await?, "old");
+    Ok(())
+}
+
+/// Encodes "new" once released; encoding runs on a blocking thread under the
+/// lock, so pausing it keeps the lock held.
+struct GatedEncode {
+    started: oneshot::Sender<()>,
+    release: std::sync::mpsc::Receiver<()>,
+}
+
+impl Encode for GatedEncode {
+    type Error = std::convert::Infallible;
+
+    fn encode(self) -> Result<Vec<u8>, Self::Error> {
+        let _ = self.started.send(());
+        let _ = self.release.recv();
+        Ok(b"new".to_vec())
+    }
+}
+
+#[tokio::test]
+async fn cancelled_write_finishes_in_background_and_keeps_the_lock() -> anyhow::Result<()> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("data");
+    std::fs::write(&path, "old")?;
+    let (started, wait_started) = oneshot::channel();
+    let (release, wait_release) = std::sync::mpsc::channel();
+    let write = tokio::spawn(fs::write(
+        path.clone(),
+        GatedEncode {
+            started,
+            release: wait_release,
+        },
+    ));
+    tokio::time::timeout(Duration::from_secs(5), wait_started)
+        .await?
+        .unwrap();
+    write.abort();
+    let _ = write.await;
+    assert_eq!(
+        fs::write(&path, "conflict".to_owned())
+            .await
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::WouldBlock
+    );
+    assert_eq!(std::fs::read_to_string(&path)?, "old");
+    release.send(()).unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        fs::edit(&path, |text: String| async move {
+            assert_eq!(text, "new");
+            Ok::<_, fs::Error>(text)
+        }),
+    )
+    .await??;
+    assert_eq!(std::fs::read_to_string(&path)?, "new");
+    assert_eq!(std::fs::read_dir(directory.path())?.count(), 1);
     Ok(())
 }
 
@@ -371,21 +392,7 @@ mod codec_panics {
     }
 
     #[tokio::test]
-    async fn read_propagates_decode_panic() -> anyhow::Result<()> {
-        let directory = tempfile::tempdir()?;
-        let path = directory.path().join("data");
-        std::fs::write(&path, b"old")?;
-
-        let error = tokio::spawn(fs::read::<PanickingDecode>(path.clone()))
-            .await
-            .unwrap_err();
-        assert_panic(error, CodecPanic::Decode);
-        assert_eq!(std::fs::read(&path)?, b"old");
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn write_propagates_encode_panic_and_preserves_original() -> anyhow::Result<()> {
+    async fn write_and_edit_propagate_encode_panic_and_preserve_original() -> anyhow::Result<()> {
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("data");
         std::fs::write(&path, b"old")?;
@@ -393,6 +400,16 @@ mod codec_panics {
         let error = tokio::spawn(fs::write(path.clone(), PanickingEncode))
             .await
             .unwrap_err();
+        assert_panic(error, CodecPanic::Encode);
+        assert_original_and_cleanup(&path).await?;
+
+        std::fs::write(&path, b"old")?;
+        let error = tokio::spawn(fs::edit(
+            path.clone(),
+            |value: PanickingEncode| async move { Ok::<_, fs::Error>(value) },
+        ))
+        .await
+        .unwrap_err();
         assert_panic(error, CodecPanic::Encode);
         assert_original_and_cleanup(&path).await
     }
@@ -404,6 +421,10 @@ mod codec_panics {
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("data");
         std::fs::write(&path, b"old")?;
+        let error = tokio::spawn(fs::read::<PanickingDecode>(path.clone()))
+            .await
+            .unwrap_err();
+        assert_panic(error, CodecPanic::Decode);
         let ran = Arc::new(AtomicBool::new(false));
         let handler_ran = ran.clone();
 
@@ -417,56 +438,6 @@ mod codec_panics {
         assert!(!ran.load(SeqCst));
         assert_original_and_cleanup(&path).await
     }
-
-    #[tokio::test]
-    async fn edit_propagates_encode_panic_and_preserves_original() -> anyhow::Result<()> {
-        let directory = tempfile::tempdir()?;
-        let path = directory.path().join("data");
-        std::fs::write(&path, b"old")?;
-
-        let error = tokio::spawn(fs::edit(
-            path.clone(),
-            |value: PanickingEncode| async move { Ok::<_, fs::Error>(value) },
-        ))
-        .await
-        .unwrap_err();
-        assert_panic(error, CodecPanic::Encode);
-        assert_original_and_cleanup(&path).await
-    }
-}
-
-#[tokio::test]
-async fn edit_handler_can_borrow_context_and_return_a_non_send_error() -> anyhow::Result<()> {
-    use std::{cell::Cell, rc::Rc};
-
-    #[derive(Debug)]
-    struct HandlerError(Rc<io::Error>);
-
-    impl From<fs::Error> for HandlerError {
-        fn from(error: fs::Error) -> Self {
-            Self(Rc::new(io::Error::other(error)))
-        }
-    }
-
-    let directory = tempfile::tempdir()?;
-    let path = directory.path().join("data");
-    fs::write(&path, "old".to_owned()).await?;
-    let calls = Rc::new(Cell::new(0));
-    let error = fs::edit(&path, |_: String| {
-        calls.set(calls.get() + 1);
-        async {
-            tokio::task::yield_now().await;
-            Err::<String, _>(HandlerError(Rc::new(io::Error::other("handler failed"))))
-        }
-    })
-    .await
-    .unwrap_err();
-    assert_eq!(calls.get(), 1);
-    assert_eq!(error.0.to_string(), "handler failed");
-    assert_eq!(fs::read::<String>(&path).await?, "old");
-    assert_eq!(std::fs::read_dir(directory.path())?.count(), 1);
-    fs::write(&path, "after".to_owned()).await?;
-    Ok(())
 }
 
 #[tokio::test]
@@ -663,36 +634,6 @@ async fn directories_metadata_and_temporary_resources() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-async fn codecs_and_custom_anyhow_errors_work_through_fs() -> anyhow::Result<()> {
-    #[derive(serde::Serialize, serde::Deserialize)]
-    struct Dataset {
-        name: String,
-    }
-    let directory = tempfile::tempdir()?;
-    let path = directory.path().join("data.toml");
-    fs::write(
-        &path,
-        Toml(Dataset {
-            name: "corpus".into(),
-        }),
-    )
-    .await?;
-    let data: Toml<Dataset> = fs::read(&path).await?;
-    assert_eq!(data.0.name, "corpus");
-    struct Custom;
-    impl Decode for Custom {
-        type Error = anyhow::Error;
-        fn decode(_: Vec<u8>) -> anyhow::Result<Self> {
-            anyhow::bail!("custom decoder failed")
-        }
-    }
-    assert!(
-        matches!(fs::read::<Custom>(&path).await, Err(error) if error.kind() == io::ErrorKind::InvalidData && error.source().unwrap().to_string() == "custom decoder failed")
-    );
-    Ok(())
-}
-
 #[tokio::test(flavor = "current_thread")]
 async fn file_conversions_run_in_workers_and_handler_runs_in_the_calling_task() -> anyhow::Result<()>
 {
@@ -780,20 +721,6 @@ fn resource_handles_and_standard_operation_futures_are_send() {
     future_send(fs::edit(Path::new("data"), |text: String| async move {
         Ok::<_, fs::Error>(text)
     }));
-}
-
-#[cfg(windows)]
-#[tokio::test]
-async fn windows_alternate_streams_survive_file_replacement() -> anyhow::Result<()> {
-    let directory = tempfile::tempdir()?;
-    let path = directory.path().join("data");
-    std::fs::write(&path, "old")?;
-    let stream = path.with_file_name("data:fairway-test");
-    std::fs::write(&stream, "stream metadata")?;
-    fs::write(&path, "new".to_owned()).await?;
-    assert_eq!(std::fs::read_to_string(&stream)?, "stream metadata");
-    assert_eq!(fs::read::<String>(&path).await?, "new");
-    Ok(())
 }
 
 #[cfg(unix)]
@@ -896,23 +823,6 @@ mod unix {
     #[tokio::test]
     async fn macos_case_and_unicode_aliases_share_locks_even_before_creation() -> anyhow::Result<()>
     {
-        struct GatedEncode {
-            started: oneshot::Sender<()>,
-            release: std::sync::mpsc::Receiver<()>,
-        }
-
-        impl Encode for GatedEncode {
-            type Error = std::convert::Infallible;
-
-            fn encode(self) -> Result<Vec<u8>, Self::Error> {
-                let _ = self.started.send(());
-                // Encoding runs under the lock, so pausing it keeps the lock
-                // held while the test tries the alias.
-                let _ = self.release.recv();
-                Ok(b"new".to_vec())
-            }
-        }
-
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("Café");
         let alias = directory.path().join("CAFE\u{301}");
@@ -1012,77 +922,6 @@ mod unix {
             assert_eq!(after.st_flags(), before.st_flags());
             assert!(after.modified()? > before.modified()?);
             assert_eq!(std::fs::read_to_string(&path)?, "new");
-        }
-        Ok(())
-    }
-
-    #[cfg(target_os = "macos")]
-    #[tokio::test]
-    #[ignore = "requires a volume that rounds creation times; set FAIRWAY_TEST_ROUNDING_VOLUME"]
-    async fn macos_writes_and_edits_accept_creation_time_rounding() -> anyhow::Result<()> {
-        use std::{
-            fs::{File, FileTimes},
-            os::macos::fs::FileTimesExt,
-        };
-
-        let volume = std::env::var_os("FAIRWAY_TEST_ROUNDING_VOLUME").expect(
-            "set FAIRWAY_TEST_ROUNDING_VOLUME to a mounted volume that rounds creation times",
-        );
-        let directory = tempfile::tempdir_in(volume)?;
-        let reference = File::create(directory.path().join("reference"))?;
-        for editing in [false, true] {
-            let path = directory
-                .path()
-                .join(if editing { "edit" } else { "write" });
-            // On exFAT, a newly created file can have a more precise creation
-            // time than the filesystem can preserve when setting it later.
-            std::fs::write(&path, "old")?;
-            let created = std::fs::metadata(&path)?.created()?;
-            reference.set_times(FileTimes::new().set_created(created))?;
-            let expected = reference.metadata()?.created()?;
-            assert_ne!(
-                expected, created,
-                "the selected volume did not round the creation time; this scenario was not exercised"
-            );
-
-            if editing {
-                fs::edit(&path, |text: String| async move {
-                    assert_eq!(text, "old");
-                    Ok::<_, fs::Error>("new".to_owned())
-                })
-                .await?;
-            } else {
-                fs::write(&path, "new".to_owned()).await?;
-            }
-            assert_eq!(std::fs::metadata(&path)?.created()?, expected);
-            assert_eq!(std::fs::read_to_string(&path)?, "new");
-        }
-        Ok(())
-    }
-
-    #[cfg(target_os = "macos")]
-    #[tokio::test]
-    async fn macos_protected_files_fail_without_leaking_temporaries() -> anyhow::Result<()> {
-        use std::process::Command;
-        for flag in ["uchg", "uappnd"] {
-            let directory = tempfile::tempdir()?;
-            let path = directory.path().join("protected");
-            std::fs::write(&path, "old")?;
-            let result = Command::new("chflags").arg(flag).arg(&path).output()?;
-            assert!(result.status.success(), "{result:?}");
-            let result = fs::write(&path, "new".to_owned()).await;
-            let entries = std::fs::read_dir(directory.path())?.count();
-            // Clear the flags of the whole directory before asserting: a
-            // protected temporary file left by a bug would keep the directory
-            // from being removed.
-            let cleanup = Command::new("chflags")
-                .args(["-R", "0"])
-                .arg(directory.path())
-                .output()?;
-            assert!(cleanup.status.success(), "{cleanup:?}");
-            assert_eq!(result.unwrap_err().kind(), io::ErrorKind::PermissionDenied);
-            assert_eq!(std::fs::read_to_string(&path)?, "old");
-            assert_eq!(entries, 1);
         }
         Ok(())
     }

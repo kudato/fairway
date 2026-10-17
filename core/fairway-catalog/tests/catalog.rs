@@ -57,15 +57,19 @@ fn an_empty_namespace() {
         "rust/check",
         "Git/commit",
         "путь/задача ✓",
+        // Parts are literal: no path resolution and no escaping.
+        "../escape.rs",
+        "literal/\"quote\"\\path\n\0/✓",
     ] {
         assert_eq!(STATE.put(address, address.to_owned()).unwrap(), None);
+        assert_eq!(STATE.get(address).as_deref(), Some(address));
     }
     assert_eq!(STATE.list("git/*"), ["git/commit", "git/hooks/pre-commit"]);
     assert_eq!(STATE.list("*/commit"), ["Git/commit", "git/commit"]);
     assert_eq!(STATE.list("git"), ["git"]);
     assert_eq!(STATE.list("*задача*"), ["путь/задача ✓"]);
     assert!(STATE.list("missing/*").is_empty());
-    assert_eq!(STATE.list("*").len(), 6);
+    assert_eq!(STATE.list("*").len(), 8);
 
     let previous = STATE.put("git/commit", "replacement".to_owned()).unwrap();
     assert_eq!(previous.as_deref(), Some("git/commit"));
@@ -96,6 +100,8 @@ fn invalid_addresses_change_nothing() {
             "address \"state/git//commit\" has an empty part",
         ),
         ("git/*", "address \"state/git/*\" contains `*`"),
+        ("git/com*it", "address \"state/git/com*it\" contains `*`"),
+        ("*", "address \"state/*\" contains `*`"),
     ] {
         let put = STATE.put(address, String::new()).unwrap_err();
         assert_eq!(put.to_string(), error);

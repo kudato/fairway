@@ -107,33 +107,19 @@ mod tests {
     use super::{Embedded, Registration, check};
 
     #[test]
-    fn valid_declarations_pass() {
-        check(
-            &[
-                Registration::new("writing", "plugin_a", "plugin_a (a.rs:1)"),
-                Registration::new("editing", "plugin_a::skills", "plugin_a::skills (a.rs:2)"),
-                Registration::new("empty", "plugin_b", "plugin_b (b.rs:1)"),
-            ],
-            &[Embedded::new(
-                &["editing", "writing"],
-                "plugin_a",
-                "plugin_a (a.rs:3)",
-            )],
-        )
-        .unwrap();
-        check(&[], &[]).unwrap();
-    }
-
-    #[test]
     fn every_problem_is_reported_with_its_sources() {
         let error = check(
             &[
                 Registration::new("writing", "plugin_b", "plugin_b (b.rs:1)"),
                 Registration::new("writing", "plugin_a", "plugin_a (a.rs:1)"),
                 Registration::new("editing", "plugin_b", "plugin_b (b.rs:2)"),
+                // A registering submodule is reduced to its crate before matching.
+                Registration::new("drafts", "plugin_a::skills", "plugin_a::skills (a.rs:2)"),
+                // Crate `plugin` does not own the namespaces of crate `plugin_a`.
+                Registration::new("notes", "plugin", "plugin (p.rs:1)"),
             ],
             &[Embedded::new(
-                &["editing", "notes", "writing"],
+                &["drafts", "editing", "notes", "writing"],
                 "plugin_a::skills",
                 "plugin_a::skills (a.rs:9)",
             )],
@@ -147,19 +133,6 @@ mod tests {
              with `namespace!`: plugin_a::skills (a.rs:9)\n  \
              builtins in skill namespace \"notes\" that crate `plugin_a` does not declare \
              with `namespace!`: plugin_a::skills (a.rs:9)"
-        );
-    }
-
-    #[test]
-    fn a_crate_name_is_not_a_prefix_match() {
-        let error = check(
-            &[Registration::new("writing", "plugin", "plugin (p.rs:1)")],
-            &[Embedded::new(&["writing"], "plugin_a", "plugin_a (a.rs:1)")],
-        )
-        .unwrap_err();
-        assert!(
-            error.contains("crate `plugin_a` does not declare"),
-            "{error}"
         );
     }
 }

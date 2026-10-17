@@ -2,7 +2,7 @@
 
 use std::{error::Error as _, io, path::Path};
 
-use fairway_codec::{Decode, Json};
+use fairway_codec::Decode;
 use fairway_fs::{self as fs, Operation};
 
 #[tokio::test]
@@ -28,34 +28,6 @@ async fn native_errors_preserve_the_cause_and_share_it_when_cloned() -> anyhow::
     ));
     drop(error);
     assert_eq!(cloned.raw_os_error(), native.raw_os_error());
-    Ok(())
-}
-
-#[tokio::test]
-async fn codec_errors_are_direct_sources_with_the_parser_chain_intact() -> anyhow::Result<()> {
-    let directory = tempfile::tempdir()?;
-    let path = directory.path().join("data.json");
-    std::fs::write(&path, b"[1,\n x]")?;
-    let error = fs::read::<Json<Vec<u32>>>(&path).await.unwrap_err();
-    assert_eq!(error.operation(), Operation::Decode);
-    assert_eq!(error.path(), Some(path.as_path()));
-    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-    assert_eq!(error.raw_os_error(), None);
-    let codec = error
-        .source()
-        .unwrap()
-        .downcast_ref::<fairway_codec::Error>()
-        .unwrap();
-    assert!(matches!(
-        codec,
-        fairway_codec::Error::Decode {
-            format: "json",
-            line: Some(2),
-            column: Some(2),
-            ..
-        }
-    ));
-    assert!(codec.source().unwrap().is::<fairway_codec::json::Error>());
     Ok(())
 }
 
@@ -87,6 +59,7 @@ async fn custom_decoder_errors_keep_their_type_and_data() -> anyhow::Result<()> 
     std::fs::write(&path, b"original bytes")?;
     let error = fs::read::<Document>(&path).await.unwrap_err();
     assert_eq!(error.operation(), Operation::Decode);
+    assert_eq!(error.path(), Some(path.as_path()));
     assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     assert_eq!(
         error
@@ -97,6 +70,17 @@ async fn custom_decoder_errors_keep_their_type_and_data() -> anyhow::Result<()> 
             .0,
         b"original bytes"
     );
+
+    struct Custom;
+    impl Decode for Custom {
+        type Error = anyhow::Error;
+        fn decode(_: Vec<u8>) -> anyhow::Result<Self> {
+            anyhow::bail!("custom decoder failed")
+        }
+    }
+    let error = fs::read::<Custom>(&path).await.err().unwrap();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert_eq!(error.source().unwrap().to_string(), "custom decoder failed");
     Ok(())
 }
 
@@ -109,6 +93,10 @@ async fn own_validation_errors_have_context_without_an_artificial_source() -> an
     assert!(empty.source().is_none());
     assert_eq!(empty.raw_os_error(), None);
     assert!(empty.to_string().contains("empty filesystem path"));
+    let exists = fs::exists("").await.unwrap_err();
+    assert_eq!(exists.operation(), Operation::ResolvePath);
+    assert_eq!(exists.path(), Some(Path::new("")));
+    assert_eq!(exists.kind(), io::ErrorKind::NotFound);
 
     let directory = tempfile::tempdir()?;
     let path = std::fs::canonicalize(directory.path())?;
@@ -121,31 +109,6 @@ async fn own_validation_errors_have_context_without_an_artificial_source() -> an
     assert!(error.source().is_none());
     assert_eq!(error.raw_os_error(), None);
     assert!(error.to_string().contains("regular file"));
-    Ok(())
-}
-
-#[tokio::test]
-async fn exists_rejects_an_empty_path() {
-    let error = fs::exists("").await.unwrap_err();
-    assert_eq!(error.kind(), io::ErrorKind::NotFound);
-    assert_eq!(error.operation(), Operation::ResolvePath);
-    assert_eq!(error.path(), Some(Path::new("")));
-}
-
-#[tokio::test]
-async fn a_busy_error_identifies_the_target_and_has_no_lower_level_cause() -> anyhow::Result<()> {
-    let directory = tempfile::tempdir()?;
-    let path = std::fs::canonicalize(directory.path())?.join("data");
-    std::fs::write(&path, b"old")?;
-    fs::edit(&path, |text: String| async {
-        let error = fs::write(&path, "conflict".to_owned()).await.unwrap_err();
-        assert_eq!(error.operation(), Operation::Lock);
-        assert_eq!(error.path(), Some(path.as_path()));
-        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
-        assert!(error.source().is_none());
-        Ok::<_, fs::Error>(text)
-    })
-    .await?;
     Ok(())
 }
 
@@ -221,8 +184,14 @@ async fn edit_converts_filesystem_errors_into_the_handlers_error_type() -> anyho
     assert!(error.source().unwrap().is::<fairway_codec::Error>());
 
     std::fs::write(&path, "old")?;
-    let error = fs::edit(&path, |_: String| async {
-        Err::<String, _>(ApplicationError::Handler(std::rc::Rc::new(37)))
+    // The handler may borrow from the caller and return a non-Send error.
+    let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+    let error = fs::edit(&path, |_: String| {
+        calls.set(calls.get() + 1);
+        async {
+            tokio::task::yield_now().await;
+            Err::<String, _>(ApplicationError::Handler(std::rc::Rc::new(37)))
+        }
     })
     .await
     .unwrap_err();
@@ -230,6 +199,9 @@ async fn edit_converts_filesystem_errors_into_the_handlers_error_type() -> anyho
         panic!("expected the handler's error")
     };
     assert_eq!(*actual, 37);
+    assert_eq!(calls.get(), 1);
     assert_eq!(std::fs::read(&path)?, b"old");
+    assert_eq!(std::fs::read_dir(directory.path())?.count(), 1);
+    fs::write(&path, "after".to_owned()).await?;
     Ok(())
 }

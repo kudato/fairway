@@ -7,13 +7,13 @@ use std::time::Duration;
 
 use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
 
-fn rust_examples(markdown: &str) -> Vec<String> {
+fn examples(markdown: &str, language: &str) -> Vec<String> {
     let mut examples = Vec::new();
     let mut source = None;
     for event in Parser::new(markdown) {
         match event {
             Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info)))
-                if info.as_ref() == "rust" =>
+                if info.as_ref() == language =>
             {
                 source = Some(String::new());
             }
@@ -30,7 +30,7 @@ fn rust_examples(markdown: &str) -> Vec<String> {
             _ => {}
         }
     }
-    assert!(!examples.is_empty(), "the CLI guide has no Rust examples");
+    assert!(!examples.is_empty(), "the guide has no {language} examples");
     examples
 }
 
@@ -55,7 +55,7 @@ fn cli_guides() {
 
         // Each complete plugin example gets its own module; its source stays in Markdown.
         let mut library = String::new();
-        for (index, source) in rust_examples(&markdown).iter().enumerate() {
+        for (index, source) in examples(&markdown, "rust").iter().enumerate() {
             fs::write(src.join(format!("example_{index}.rs")), source).unwrap();
             library.push_str(&format!("mod example_{index};\n"));
         }

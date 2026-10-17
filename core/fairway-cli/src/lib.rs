@@ -35,14 +35,6 @@ mod macros;
 mod parse;
 mod registry;
 
-#[cfg(doctest)]
-#[doc = include_str!("../../../docs/ru/plugin-development/cli.md")]
-mod guide_ru {}
-
-#[cfg(doctest)]
-#[doc = include_str!("../../../docs/en/plugin-development/cli.md")]
-mod guide_en {}
-
 use tokio_util::sync::CancellationToken;
 
 #[doc(inline)]

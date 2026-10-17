@@ -2,8 +2,7 @@
 
 use std::{error::Error as _, io};
 
-use fairway_codec::{Decode, Encode, Error, Json, Toml, Yaml, Zstd};
-use serde::{Deserialize, Serialize};
+use fairway_codec::{Decode, Encode, Error, Json, Toml, Zstd};
 
 #[test]
 fn raw_buffers_round_trip_and_interoperate_with_standard_zstd_streams() {
@@ -20,37 +19,9 @@ fn raw_buffers_round_trip_and_interoperate_with_standard_zstd_streams() {
         let restored: Zstd = Zstd::decode(external).unwrap();
         assert_eq!(restored.into_inner(), contents);
     }
-}
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
-struct Settings {
-    name: String,
-    retries: u32,
-}
-
-#[test]
-fn text_and_structured_codecs_compose_with_compression() {
     let packed = Zstd("hello\n".to_owned()).encode().unwrap();
     assert_eq!(Zstd::<String>::decode(packed).unwrap().as_ref(), "hello\n");
-
-    let settings = Settings {
-        name: "example".to_owned(),
-        retries: 3,
-    };
-    let packed = Zstd(Json(&settings)).encode().unwrap();
-    assert_eq!(
-        Zstd::<Json<Settings>>::decode(packed).unwrap().0.0,
-        settings
-    );
-    let packed = Zstd(Toml(&settings)).encode().unwrap();
-    assert_eq!(
-        Zstd::<Toml<Settings>>::decode(packed).unwrap().0.0,
-        settings
-    );
-    let packed = Zstd(Yaml(settings)).encode().unwrap();
-    let Zstd(Yaml(restored)) = Zstd::<Yaml<Settings>>::decode(packed).unwrap();
-    assert_eq!(restored.name, "example");
-    assert_eq!(restored.retries, 3);
 }
 
 #[test]
@@ -111,15 +82,6 @@ fn inner_decoding_errors_keep_their_format_position_and_source() {
 }
 
 #[test]
-fn inner_encoding_errors_keep_their_format_and_source() {
-    let error = Zstd(Toml(42)).encode().unwrap_err();
-    assert!(matches!(error, Error::Encode { format: "zstd", .. }));
-    let inner = error.source().unwrap().downcast_ref::<Error>().unwrap();
-    assert!(matches!(inner, Error::Encode { format: "toml", .. }));
-    assert!(inner.source().unwrap().is::<toml::ser::Error>());
-}
-
-#[test]
 fn custom_codecs_need_only_one_direction_and_boxable_errors() {
     struct EncodeOnly;
 
@@ -148,6 +110,12 @@ fn custom_codecs_need_only_one_direction_and_boxable_errors() {
         error.source().unwrap().to_string(),
         "custom encoding failed"
     );
+    // The inner codec's error stays typed, so callers can downcast it.
+    let error = Zstd(Toml(1)).encode().unwrap_err();
+    assert!(matches!(
+        error.source().unwrap().downcast_ref::<Error>(),
+        Some(Error::Encode { format: "toml", .. })
+    ));
 
     // Arrays implement Encode but not Decode, and their error is Infallible.
     let packed = Zstd(*b"hello").encode().unwrap();

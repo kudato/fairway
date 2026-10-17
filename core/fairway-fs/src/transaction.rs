@@ -28,13 +28,6 @@ pub(crate) struct Transaction {
     original: Option<File>,
     target: PathBuf,
     lock: Option<FileLock>,
-    /// Lets a test pause `commit` on the blocking thread: `commit` reports
-    /// through the sender that it has started and waits for the receiver.
-    #[cfg(test)]
-    commit_gate: Option<(
-        tokio::sync::oneshot::Sender<()>,
-        std::sync::mpsc::Receiver<()>,
-    )>,
 }
 
 /// Resolves the target of `path` and locks it; only `editing` waits for the
@@ -87,8 +80,6 @@ pub(crate) fn open(
             original,
             target,
             lock: Some(lock),
-            #[cfg(test)]
-            commit_gate: None,
         },
         source,
     ))
@@ -102,11 +93,6 @@ impl Transaction {
     /// the replacement finishes even if the operation is cancelled. If any
     /// step fails, the target is left as it was.
     pub(crate) fn commit(mut self, bytes: Vec<u8>) -> Result<(), Error> {
-        #[cfg(test)]
-        if let Some((started, release)) = self.commit_gate.take() {
-            let _ = started.send(());
-            release.recv().expect("commit gate released");
-        }
         let result = self.publish(&bytes);
         self.discard();
         result
@@ -187,8 +173,7 @@ impl Drop for Transaction {
 mod tests {
     use super::*;
     use crate::blocking;
-    use std::{io, sync::mpsc};
-    use tokio::sync::oneshot;
+    use std::io;
 
     async fn open_transaction(path: &Path, editing: bool) -> Result<Transaction, Error> {
         let (target, lock) = prepare(path, editing).await?;
@@ -199,7 +184,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failed_write_preserves_original_and_cleans_up() -> anyhow::Result<()> {
+    async fn failed_commits_report_their_step_and_preserve_the_target() -> anyhow::Result<()> {
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("data");
         std::fs::write(&path, "old")?;
@@ -223,6 +208,21 @@ mod tests {
         })
         .await?;
         assert_eq!(std::fs::read_to_string(path)?, "following");
+
+        // Without the temporary file, the rename fails.
+        let path = std::fs::canonicalize(directory.path())?.join("new");
+        let output = open_transaction(&path, false).await?;
+        std::fs::remove_file(output.lock.as_ref().unwrap().path())?;
+        let error = blocking(Operation::Write, Some(path.clone()), move || {
+            output.commit(b"new".to_vec())
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(error.operation(), Operation::Replace);
+        assert_eq!(error.path(), Some(path.as_path()));
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert!(std::error::Error::source(&error).unwrap().is::<io::Error>());
+        assert!(!path.exists());
         Ok(())
     }
 
@@ -250,65 +250,6 @@ mod tests {
         })
         .await?;
         assert_eq!(std::fs::read(path)?, b"new");
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn cancelling_commit_keeps_the_lock_until_background_replacement_completes()
-    -> anyhow::Result<()> {
-        let directory = tempfile::tempdir()?;
-        let path = directory.path().join("data");
-        std::fs::write(&path, "old")?;
-        let mut output = open_transaction(&path, false).await?;
-        // Pause the commit once it has started on the blocking thread, and
-        // cancel the task that awaits it.
-        let (started, receiver) = oneshot::channel();
-        let (release, wait) = mpsc::channel();
-        output.commit_gate = Some((started, wait));
-        let commit = tokio::spawn(blocking(Operation::Write, Some(path.clone()), move || {
-            output.commit(b"new".to_vec())
-        }));
-        receiver.await.unwrap();
-        commit.abort();
-        let _ = commit.await;
-        assert!(
-            matches!(open_transaction(&path, false).await, Err(error) if error.kind() == io::ErrorKind::WouldBlock)
-        );
-        assert_eq!(std::fs::read_to_string(&path)?, "old");
-        release.send(()).unwrap();
-        let following = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            open_transaction(&path, true),
-        )
-        .await??;
-        assert_eq!(std::fs::read_to_string(&path)?, "new");
-        blocking(Operation::Write, Some(path.clone()), move || {
-            following.abort();
-            Ok(())
-        })
-        .await?;
-        assert_eq!(std::fs::read_dir(directory.path())?.count(), 1);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn replacement_failure_reports_the_target_and_original_os_error() -> anyhow::Result<()> {
-        let directory = tempfile::tempdir()?;
-        let path = std::fs::canonicalize(directory.path())?.join("new");
-        let output = open_transaction(&path, false).await?;
-        // Without the temporary file, the rename fails.
-        std::fs::remove_file(output.lock.as_ref().unwrap().path())?;
-        let error = blocking(Operation::Write, Some(path.clone()), move || {
-            output.commit(b"new".to_vec())
-        })
-        .await
-        .unwrap_err();
-        assert_eq!(error.operation(), Operation::Replace);
-        assert_eq!(error.path(), Some(path.as_path()));
-        assert_eq!(error.kind(), io::ErrorKind::NotFound);
-        assert!(std::error::Error::source(&error).unwrap().is::<io::Error>());
-        assert!(!path.exists());
-        assert_eq!(std::fs::read_dir(directory.path())?.count(), 0);
         Ok(())
     }
 

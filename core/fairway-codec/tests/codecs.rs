@@ -4,7 +4,7 @@
 use std::{convert::Infallible, error::Error as _};
 
 use fairway_codec::{Decode, Encode, Error, Json, Markdown, Toml};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 #[test]
 fn raw_data_is_owned_and_custom_errors_need_no_io_conversion() {
@@ -38,27 +38,6 @@ fn raw_data_is_owned_and_custom_errors_need_no_io_conversion() {
     assert_eq!(Custom.encode(), Err("custom encoding failed"));
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
-struct Dataset {
-    name: String,
-    files: Vec<String>,
-}
-
-#[test]
-fn json_and_toml_round_trip_owned_and_borrowed_values() {
-    let value = Dataset {
-        name: "документы".into(),
-        files: vec!["a.jsonl".into()],
-    };
-    let bytes = Json(&value).encode().unwrap();
-    assert!(bytes.ends_with(b"\n"));
-    assert!(!bytes.ends_with(b"\n\n"));
-    assert_eq!(Json::<Dataset>::decode(bytes).unwrap().as_ref(), &value);
-    let bytes = Toml(&value).encode().unwrap();
-    assert_eq!(Toml::<Dataset>::decode(bytes).unwrap().into_inner(), value);
-    assert_eq!(Json(vec![1, 2]).encode().unwrap(), b"[1,2]\n");
-}
-
 #[test]
 fn format_errors_retain_format_position_and_source() {
     let error = Json::<Vec<u8>>::decode(b"[1,\nno]".to_vec()).unwrap_err();
@@ -74,7 +53,7 @@ fn format_errors_retain_format_position_and_source() {
     ));
     assert!(Json::<u32>::decode(b"1 2".to_vec()).is_err());
     assert_eq!(Json::<u32>::decode(b"1 \r\n\t".to_vec()).unwrap().0, 1);
-    let error = Toml::<Dataset>::decode(b"name = 'x'\nfiles = [".to_vec()).unwrap_err();
+    let error = Toml::<toml::Table>::decode(b"name = 'x'\nfiles = [".to_vec()).unwrap_err();
     assert!(matches!(
         error,
         Error::Decode {
@@ -85,7 +64,8 @@ fn format_errors_retain_format_position_and_source() {
     ));
     let error = Toml(1).encode().unwrap_err();
     assert!(matches!(error, Error::Encode { format: "toml", .. }));
-    let error = Toml::<Dataset>::decode(vec![0xff]).unwrap_err();
+    assert!(error.source().unwrap().is::<toml::ser::Error>());
+    let error = Toml::<toml::Table>::decode(vec![0xff]).unwrap_err();
     assert!(error.source().unwrap().is::<std::str::Utf8Error>());
 }
 
@@ -108,12 +88,6 @@ fn parser_error_columns_count_bytes_after_non_ascii_text() {
     }
 }
 
-fn render(text: &str) -> String {
-    let mut html = String::new();
-    pulldown_cmark::html::push_html(&mut html, pulldown_cmark::Parser::new(text));
-    html
-}
-
 #[test]
 fn markdown_traversals_are_independent_and_can_stop_early() {
     use fairway_codec::markdown::{Event, HeadingLevel, Tag};
@@ -130,9 +104,10 @@ fn markdown_traversals_are_independent_and_can_stop_early() {
             ..
         }))
     ));
+    let expected = "<h1>Heading</h1>\n<p><a href=\"/target\">link</a> and <em>emphasis</em></p>\n";
     let mut html = String::new();
     pulldown_cmark::html::push_html(&mut html, document.events());
-    assert_eq!(html, render(source));
+    assert_eq!(html, expected);
     assert_eq!(first.next(), Some(Event::Text("Heading".into())));
     drop(first);
 
@@ -140,29 +115,56 @@ fn markdown_traversals_are_independent_and_can_stop_early() {
     drop(document);
     let mut html = String::new();
     pulldown_cmark::html::push_html(&mut html, clone.events());
-    assert_eq!(html, render(source));
+    assert_eq!(html, expected);
     assert_eq!(clone.encode().unwrap(), source.as_bytes());
+
+    // Traversal may normalize the text it yields, but never the stored source.
+    for text in [
+        "4\\. This is text, not a list\n",
+        "# Кот\r\n\r\n\tКод\r\n\r\n*курсив* и _курсив_  \r\n",
+    ] {
+        let document = Markdown::parse(text.to_owned());
+        document.events().for_each(|event| {
+            std::hint::black_box(event);
+        });
+        assert_eq!(document.as_ref(), text);
+        assert_eq!(document.encode().unwrap(), text.as_bytes());
+    }
 }
 
 #[test]
-fn markdown_encoding_does_not_reinterpret_text_as_structure() {
-    for text in [
-        "4\\. This is text, not a list\n",
-        "Literal &amp;copy; and &#10;&#10; newlines in a paragraph\n",
-        "Heading *across\nmultiple lines*\n======\n",
-        "Text\n    ---\n",
-        "[unknown][reference]\n\n[reference]: /target 'title'\n",
-        "# Кот\r\n\r\n\tКод\r\n\r\n*курсив* и _курсив_  \r\n",
-        "Text without a final newline\0with a NUL",
-    ] {
-        let document = Markdown::parse(text.to_owned());
-        assert_eq!(document.as_ref(), text);
-        // Events may normalize the text they carry, but traversal must leave
-        // the stored source untouched.
-        for event in document.events() {
-            std::hint::black_box(event);
-        }
-        assert_eq!(document.encode().unwrap(), text.as_bytes());
+fn markdown_follows_plain_commonmark_without_extensions() {
+    use fairway_codec::markdown::{Event, Tag};
+
+    let source = "---\ntitle: front matter\n---\n\n~~struck~~ and a footnote[^1]\n\n\
+                  - [x] task\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n[^1]: The note.\n";
+    let document = Markdown::parse(source.to_owned());
+    let events: Vec<_> = document.events().collect();
+    for event in &events {
+        assert!(
+            !matches!(
+                event,
+                Event::Start(
+                    Tag::Strikethrough
+                        | Tag::Table(_)
+                        | Tag::FootnoteDefinition(_)
+                        | Tag::MetadataBlock(_)
+                ) | Event::TaskListMarker(_)
+                    | Event::FootnoteReference(_)
+            ),
+            "{event:?} in {events:#?}"
+        );
+    }
+    // The extension syntax stays in the text of ordinary paragraphs.
+    let text: String = events
+        .iter()
+        .filter_map(|event| match event {
+            Event::Text(text) => Some(text.as_ref()),
+            _ => None,
+        })
+        .collect();
+    for literal in ["~~struck~~", "[x] task", "| a | b |", "[^1]: The note."] {
+        assert!(text.contains(literal), "{literal:?} in {text:?}");
     }
 }
 
@@ -179,11 +181,12 @@ fn default_formats_and_construction_use_only_codec_api() {
     let mut value: Json = Json::decode(br#"{"name":"fairway"}"#.to_vec()).unwrap();
     value.0["items"] = json!([1, 2]);
     let value: Json = Json::decode(value.encode().unwrap()).unwrap();
-    assert_eq!(value.0["items"][1], 2);
+    assert_eq!(value.as_ref()["items"][1], 2);
+    assert_eq!(Json(vec![1, 2]).encode().unwrap(), b"[1,2]\n");
     let mut config: Toml = Toml::decode(b"name = 'fairway'".to_vec()).unwrap();
     config.0["name"] = toml::Value::String("updated".into());
     let config: Toml = Toml::decode(config.encode().unwrap()).unwrap();
-    assert_eq!(config.0["name"].as_str(), Some("updated"));
+    assert_eq!(config.into_inner()["name"].as_str(), Some("updated"));
     let table = toml! { count = 3 };
     assert_eq!(table["count"].as_integer(), Some(3));
 }

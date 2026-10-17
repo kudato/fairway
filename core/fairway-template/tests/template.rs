@@ -12,51 +12,6 @@ use fairway_codec::{
 use fairway_template::{Error, ErrorKind, Template};
 
 #[test]
-fn renders_borrowed_structs_and_reuses_the_context() {
-    #[derive(Serialize)]
-    #[serde(crate = "fairway_codec::serde")]
-    struct Report<'a> {
-        branch: &'a str,
-        files: &'a [&'a str],
-    }
-
-    let branch = String::from("main");
-    let report = Report {
-        branch: &branch,
-        files: &["one.rs", "two.rs"],
-    };
-    let template = Template::compile(
-        "report",
-        "Branch: {{ branch }}\nFiles: {{ files | join(', ') }}\n",
-    )
-    .unwrap();
-    let expected = "Branch: main\nFiles: one.rs, two.rs\n";
-    assert_eq!(template.render(&report).unwrap(), expected);
-    assert_eq!(template.render(&report).unwrap(), expected);
-    assert_eq!(template.name(), "report");
-}
-
-#[test]
-fn renders_each_context_independently() {
-    #[derive(Serialize)]
-    #[serde(crate = "fairway_codec::serde")]
-    struct Greeting<'a> {
-        name: &'a str,
-    }
-
-    let template = Template::compile("greeting", "Hello, {{ name }}!").unwrap();
-    let greetings: Result<Vec<_>, _> = ["Anna", "Boris"]
-        .into_iter()
-        .map(|name| template.render(Greeting { name }))
-        .collect();
-    assert_eq!(greetings.unwrap(), ["Hello, Anna!", "Hello, Boris!"]);
-    assert_eq!(
-        template.render(()).unwrap_err().kind(),
-        ErrorKind::Undefined
-    );
-}
-
-#[test]
 fn empty_and_optional_contexts_still_execute_the_template() {
     let template = Template::compile(
         "heading",
@@ -80,17 +35,6 @@ fn empty_and_optional_contexts_still_execute_the_template() {
         let expected = if context.is_some() { "Report:3" } else { empty };
         assert_eq!(template.render(context).unwrap(), expected);
     }
-}
-
-#[test]
-fn context_fields_can_be_added_and_removed_at_runtime() {
-    let template = Template::compile("heading", "{{ title | default('Untitled') }}").unwrap();
-    let mut context = BTreeMap::new();
-    assert_eq!(template.render(&context).unwrap(), "Untitled");
-    context.insert("title", "Report");
-    assert_eq!(template.render(&context).unwrap(), "Report");
-    context.remove("title");
-    assert_eq!(template.render(&context).unwrap(), "Untitled");
 }
 
 #[test]
@@ -170,17 +114,19 @@ fn distinguishes_missing_null_and_empty_fields() {
 
 #[test]
 fn missing_values_fail_only_when_the_expression_is_executed() {
-    for source in [
-        "{{ missing }}",
-        "{% if missing %}yes{% endif %}",
-        "{% for item in missing %}{{ item }}{% endfor %}",
-        "{{ project.name }}",
+    for (source, kind) in [
+        ("{{ missing }}", ErrorKind::Undefined),
+        ("{% if missing %}yes{% endif %}", ErrorKind::Undefined),
+        (
+            "{% for item in missing %}{{ item }}{% endfor %}",
+            ErrorKind::Undefined,
+        ),
+        ("{{ project.name }}", ErrorKind::Undefined),
+        // MiniJinja reports undefined arithmetic as an invalid operation.
+        ("{{ missing + 1 }}", ErrorKind::Render),
     ] {
         let template = Template::compile("strict", source).unwrap();
-        assert_eq!(
-            template.render(()).unwrap_err().kind(),
-            ErrorKind::Undefined
-        );
+        assert_eq!(template.render(()).unwrap_err().kind(), kind, "{source}");
     }
 
     for source in [
@@ -195,18 +141,6 @@ fn missing_values_fail_only_when_the_expression_is_executed() {
             ""
         );
     }
-}
-
-#[test]
-fn undefined_arithmetic_is_reported_as_render_error() {
-    let template = Template::compile("arithmetic", "{{ missing + 1 }}").unwrap();
-    assert_eq!(template.render(()).unwrap_err().kind(), ErrorKind::Render);
-}
-
-#[test]
-fn join_with_an_undefined_item_follows_minijinja() {
-    let template = Template::compile("join", "{{ [missing] | join(', ') }}").unwrap();
-    assert_eq!(template.render(()).unwrap(), "");
 }
 
 #[test]

@@ -48,7 +48,7 @@ pub(crate) fn full(namespace: &str, address: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{check, check_name};
+    use super::check_name;
 
     #[test]
     fn a_namespace_name_is_one_part() {
@@ -67,27 +67,6 @@ mod tests {
             ("*", Err("a catalog namespace name cannot contain `*`")),
         ] {
             assert_eq!(check_name(name), expected, "name {name:?}");
-        }
-    }
-
-    #[test]
-    fn address_parts_are_nonempty_and_literal() {
-        for (address, expected) in [
-            ("commit", Ok(())),
-            ("git/commit", Ok(())),
-            ("git/hooks/pre-commit", Ok(())),
-            ("путь/задача ✓", Ok(())),
-            ("../escape.rs", Ok(())),
-            ("literal/\"quote\"\\path\n\0/✓", Ok(())),
-            ("", Err("has an empty part")),
-            ("/git", Err("has an empty part")),
-            ("git/", Err("has an empty part")),
-            ("git//commit", Err("has an empty part")),
-            ("git/*", Err("contains `*`")),
-            ("git/com*it", Err("contains `*`")),
-            ("*", Err("contains `*`")),
-        ] {
-            assert_eq!(check(address), expected, "address {address:?}");
         }
     }
 }

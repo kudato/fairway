@@ -340,10 +340,11 @@ fn process_configuration() {
                 std::thread::sleep(Duration::from_millis(10));
             }
             let output = child.wait_with_output().unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            // A stale `--exact` filter would run no scenario and still succeed.
             assert!(
-                output.status.success(),
-                "{mode}: {}\n{}",
-                String::from_utf8_lossy(&output.stdout),
+                output.status.success() && stdout.contains("test result: ok. 1 passed"),
+                "{mode}: {stdout}\n{}",
                 String::from_utf8_lossy(&output.stderr)
             );
         }

@@ -178,6 +178,21 @@ fn help_uses_declarations_and_field_comments() {
     assert!(root.contains("CLI tests"), "{root}");
     assert!(root.contains("Text commands"), "{root}");
     assert!(root.contains("Greeting"), "{root}");
+    // Commands are listed by name, whatever the declaration order or module.
+    let text = parse(&["fairway", "text", "--help"])
+        .err()
+        .expect("expected help")
+        .to_string();
+    for (help, names) in [
+        (&root, &["echo", "hello", "text"][..]),
+        (&text, &["both", "observe", "repeat", "upper"][..]),
+    ] {
+        let positions: Vec<_> = names
+            .iter()
+            .map(|name| help.find(&format!("\n  {name} ")).expect(name))
+            .collect();
+        assert!(positions.is_sorted(), "{help}");
+    }
     for (args, description, example) in [
         (
             vec!["fairway", "text", "repeat", "--help"],

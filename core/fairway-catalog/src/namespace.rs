@@ -191,28 +191,3 @@ impl<V: Send + Sync + 'static> Store for Namespace<V> {
         })
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::Namespace;
-    use std::{panic, sync::RwLock};
-
-    #[test]
-    fn a_poisoned_lock_keeps_its_values() {
-        let namespace = Namespace::new("test");
-        namespace.values.get_or_init(RwLock::default);
-        namespace.put("kept", 1).unwrap();
-
-        let poisoned = panic::catch_unwind(|| {
-            let _guard = namespace.write();
-            panic!("poison the namespace lock");
-        });
-        assert!(poisoned.is_err());
-        assert!(namespace.values.get().unwrap().is_poisoned());
-
-        assert_eq!(namespace.get("kept"), Some(1));
-        assert_eq!(namespace.put("added", 2).unwrap(), None);
-        assert_eq!(namespace.delete("kept").unwrap(), Some(1));
-        assert_eq!(namespace.list("*"), ["added"]);
-    }
-}

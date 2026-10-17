@@ -138,34 +138,31 @@ const fn check_part(part: &str) -> Result<(), Problem> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Address, Kind, check_namespace, parse};
+    use super::{Kind, check_namespace, parse};
 
     #[test]
-    fn an_address_has_a_kind_a_namespace_and_a_name() {
-        assert_eq!(
-            parse("skill/writing/technical"),
-            Ok(Address {
-                kind: Kind::Skill,
-                namespace: "writing",
-                entry: "writing/technical",
-            })
-        );
-        assert_eq!(
-            parse("reference/письмо/ste.v2_final-1"),
-            Ok(Address {
-                kind: Kind::Reference,
-                namespace: "письмо",
-                entry: "письмо/ste.v2_final-1",
-            })
-        );
-        assert_eq!(
-            parse("skill/../..").map(|address| address.entry),
-            Ok("../..")
-        );
-    }
+    fn addresses_are_split_or_rejected_with_a_reason() {
+        for (address, kind, namespace, entry) in [
+            (
+                "skill/writing/technical",
+                Kind::Skill,
+                "writing",
+                "writing/technical",
+            ),
+            (
+                "reference/письмо/ste.v2_final-1",
+                Kind::Reference,
+                "письмо",
+                "письмо/ste.v2_final-1",
+            ),
+            // Parts are literal, so dots are not path components.
+            ("skill/../..", Kind::Skill, "..", "../.."),
+        ] {
+            let parsed =
+                parse(address).map(|address| (address.kind, address.namespace, address.entry));
+            assert_eq!(parsed, Ok((kind, namespace, entry)), "address {address:?}");
+        }
 
-    #[test]
-    fn invalid_addresses_are_rejected_with_a_reason() {
         let three = "must have three parts: `skill/<namespace>/<name>` or \
                      `reference/<namespace>/<name>`";
         for (address, reason) in [

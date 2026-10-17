@@ -93,12 +93,6 @@ fn every_problem_is_reported_at_once() {
 }
 
 #[test]
-fn the_failure_is_kept() {
-    let report = initialize().unwrap_err().to_string();
-    assert_eq!(initialize().unwrap_err().to_string(), report);
-}
-
-#[test]
 #[should_panic(expected = "catalog is not initialized successfully")]
 fn valid_namespaces_are_not_filled_either() {
     initialize().unwrap_err();

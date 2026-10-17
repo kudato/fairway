@@ -402,7 +402,6 @@ name = "fairway-cli"
 version = "0.0.2"
 dependencies = [
  "anyhow",
- "axum",
  "clap",
  "linkme",
  "tokio",

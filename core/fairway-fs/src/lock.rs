@@ -99,10 +99,7 @@ fn adjacent(target: &Path) -> PathBuf {
 /// Waits for the local queue and the adjacent file, or tries both once when
 /// `wait` is false. An existing adjacent file is never opened or removed here.
 pub(crate) async fn acquire(target: &Path, wait: bool) -> Result<FileLock, Error> {
-    acquire_key(key(target), target, wait).await
-}
-
-async fn acquire_key(key: Key, target: &Path, wait: bool) -> Result<FileLock, Error> {
+    let key = key(target);
     let gate = {
         let mut gates = GATES
             .get_or_init(Mutex::default)
@@ -237,17 +234,15 @@ mod tests {
         }
         assert_ne!(key(Path::new("one/data")), key(Path::new("two/data")));
         assert_ne!(key(Path::new("dir/cafe")), key(Path::new("dir/café")));
-    }
 
-    #[cfg(unix)]
-    #[test]
-    fn non_unicode_names_keep_their_bytes_and_fold_the_text_around_them() {
-        use std::os::unix::ffi::OsStrExt;
-        let first = Path::new(std::ffi::OsStr::from_bytes(b"dir/\xffReport"));
-        let alias = Path::new(std::ffi::OsStr::from_bytes(b"DIR/\xffREPORT"));
-        let other = Path::new(std::ffi::OsStr::from_bytes(b"dir/\xfeReport"));
-        assert_eq!(key(first), key(alias));
-        assert_ne!(key(first), key(other));
+        // Bytes that are not UTF-8 are kept, and the text around them is folded.
+        #[cfg(unix)]
+        {
+            use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+            let path = |bytes| Path::new(OsStr::from_bytes(bytes));
+            assert_eq!(key(path(b"dir/\xffReport")), key(path(b"DIR/\xffREPORT")));
+            assert_ne!(key(path(b"dir/\xffReport")), key(path(b"dir/\xfeReport")));
+        }
     }
 
     #[tokio::test]
@@ -284,10 +279,10 @@ mod tests {
     async fn waiting_edits_are_fifo_and_cancelled_waiters_leave_the_queue() -> anyhow::Result<()> {
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("queue");
-        let first = acquire_key(key(&path), &path, true).await?;
-        let mut second = pin!(acquire_key(key(&path), &path, true));
-        let mut cancelled = Box::pin(acquire_key(key(&path), &path, true));
-        let mut last = pin!(acquire_key(key(&path), &path, true));
+        let first = acquire(&path, true).await?;
+        let mut second = pin!(acquire(&path, true));
+        let mut cancelled = Box::pin(acquire(&path, true));
+        let mut last = pin!(acquire(&path, true));
         // Poll each waiter once, so that they join the gate's queue in this order.
         poll_fn(|context| {
             assert!(second.as_mut().poll(context).is_pending());

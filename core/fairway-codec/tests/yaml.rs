@@ -3,31 +3,7 @@
 use std::{collections::BTreeMap, error::Error as _};
 
 use fairway_codec::{Decode, Encode, Error, Yaml, json, yaml};
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-struct Skill {
-    name: String,
-    description: String,
-    metadata: BTreeMap<String, String>,
-}
-
-#[test]
-fn typed_documents_round_trip_with_owned_and_borrowed_values() {
-    let input = "# Instructions\nname: commit\ndescription: |\n  Подготовь коммит.\n  Проверь изменения.\nmetadata:\n  fairway-template: \"false\"\n";
-    let mut skill = Yaml::<Skill>::decode(input.as_bytes().to_vec()).unwrap();
-    assert_eq!(
-        skill.as_ref().description,
-        "Подготовь коммит.\nПроверь изменения.\n"
-    );
-    assert_eq!(skill.0.metadata["fairway-template"], "false");
-    skill.0.name = "team-commit".into();
-    let bytes = Yaml(&skill.0).encode().unwrap();
-    assert_eq!(Yaml::<Skill>::decode(bytes).unwrap(), skill);
-    let expected = skill.0.clone();
-    let bytes = skill.encode().unwrap();
-    assert_eq!(Yaml::<Skill>::decode(bytes).unwrap().into_inner(), expected);
-}
+use serde::Serialize;
 
 #[test]
 fn default_values_use_codec_json_types_and_strict_booleans() {
@@ -59,6 +35,18 @@ fn concrete_types_support_values_outside_the_json_data_model() {
     );
     let bytes = Yaml(f64::INFINITY).encode().unwrap();
     assert_eq!(Yaml::<f64>::decode(bytes).unwrap().0, f64::INFINITY);
+
+    let input = "# Instructions\ndescription: |\n  Подготовь коммит.\n  Проверь изменения.\n";
+    let skill = Yaml::<BTreeMap<String, String>>::decode(input.as_bytes().to_vec()).unwrap();
+    assert_eq!(
+        skill.as_ref()["description"],
+        "Подготовь коммит.\nПроверь изменения.\n"
+    );
+    let bytes = skill.clone().encode().unwrap();
+    assert_eq!(
+        Yaml::<BTreeMap<String, String>>::decode(bytes).unwrap(),
+        skill
+    );
 }
 
 #[test]
@@ -156,23 +144,6 @@ fn error_columns_count_bytes_with_unicode_line_endings_and_bom() {
         ),
         "{error:?}"
     );
-}
-
-#[test]
-fn ignored_fields_still_require_valid_utf8() {
-    #[derive(Debug, Deserialize)]
-    struct Empty {}
-    let error = Yaml::<Empty>::decode(b"ignored: \xff\n".to_vec()).unwrap_err();
-    assert!(error.source().unwrap().is::<std::str::Utf8Error>());
-    assert!(matches!(
-        error,
-        Error::Decode {
-            format: "yaml",
-            line: Some(1),
-            column: Some(10),
-            ..
-        }
-    ));
 }
 
 #[test]

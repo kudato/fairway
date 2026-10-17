@@ -355,7 +355,12 @@ fn help_and_usage_errors_use_the_correct_stream_and_exit_code() {
             assert!(stdout.contains("fairway"), "{stdout}");
         } else {
             assert!(stderr.contains("--unknown"), "{stderr}");
+            assert!(stderr.contains("Usage: fairway"), "{stderr}");
+            // The child's stdout also carries libtest output.
             assert!(!stdout.contains("Usage:"), "{stdout}");
+        }
+        if argument == "--help" {
+            assert!(stdout.contains("Usage: fairway"), "{stdout}");
         }
     }
 }

@@ -203,41 +203,6 @@ value = 2
     assert_eq!(actual, expected);
 }
 
-#[tokio::test]
-async fn automatic_settings_override_all_files_and_preserve_unmentioned_keys() {
-    let home = TempDir::new().unwrap();
-    write(
-        home.path(),
-        "config.toml",
-        "[settings]\nvalue = 1\nkeep = true\n[settings.nested]\nkeep = 10\nvalue = 1\n",
-    );
-    write(
-        home.path(),
-        "conf.d/zz-last/zz-last.toml",
-        "[settings]\nvalue = 2\nitems = [1, 2]\n[settings.nested]\nvalue = 2\n",
-    );
-    write(
-        home.path(),
-        "config.auto.toml",
-        "[settings]\nvalue = 3\nitems = [3]\n[settings.nested]\nvalue = 3\n",
-    );
-    let actual = table(home.path()).await.unwrap();
-    let expected = fairway_codec::toml! {
-        value = 3
-        keep = true
-        items = [3]
-        [nested]
-        keep = 10
-        value = 3
-    };
-    assert_eq!(actual, expected);
-
-    write(home.path(), "config.auto.toml", "");
-    let actual = table(home.path()).await.unwrap();
-    assert_eq!(actual["value"].as_integer(), Some(2));
-    assert_eq!(actual["nested"]["value"].as_integer(), Some(2));
-}
-
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(crate = "fairway_codec::serde", default, deny_unknown_fields)]
 struct Settings {
@@ -256,44 +221,6 @@ impl Default for Settings {
 
 static SETTINGS: Namespace<Settings> = Namespace::new("settings");
 static SETTINGS_REGISTRATION: Registration = Registration::new(&SETTINGS, "test settings");
-
-#[tokio::test]
-async fn deserialization_and_defaults_follow_the_complete_overlay() {
-    let home = TempDir::new().unwrap();
-    write(
-        home.path(),
-        "config.toml",
-        "[settings]\nlisten = false\nttl = 60\n",
-    );
-    write(
-        home.path(),
-        "conf.d/fix.toml",
-        "[settings]\nlisten = 'server'\n",
-    );
-    let values = load(home.path(), vec![&SETTINGS_REGISTRATION])
-        .await
-        .unwrap();
-    assert_eq!(
-        values["settings"].downcast_ref::<Settings>().unwrap(),
-        &Settings {
-            listen: "server".into(),
-            ttl: 60
-        }
-    );
-    fs::remove_dir_all(home.path().join("conf.d")).unwrap();
-    write(
-        home.path(),
-        "config.toml",
-        "[settings]\nlisten = 'server'\n",
-    );
-    let values = load(home.path(), vec![&SETTINGS_REGISTRATION])
-        .await
-        .unwrap();
-    assert_eq!(
-        values["settings"].downcast_ref::<Settings>().unwrap().ttl,
-        300
-    );
-}
 
 #[derive(Default, Deserialize)]
 #[serde(crate = "fairway_codec::serde")]

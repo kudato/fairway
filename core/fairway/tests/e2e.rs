@@ -23,29 +23,10 @@ fn a_bare_invocation_answers_with_the_usage() {
 }
 
 #[test]
-fn the_help_flag_answers_with_the_usage() {
-    let out = fairway().arg("--help").output().unwrap();
-    assert_eq!(out.status.code(), Some(0), "{out:?}");
-    assert!(out.stderr.is_empty(), "{out:?}");
-    let stdout = String::from_utf8(out.stdout).unwrap();
-    assert!(stdout.contains("Usage: fairway"), "{stdout:?}");
-}
-
-#[test]
 fn the_version_flag_reports_the_version() {
     let out = fairway().arg("--version").output().unwrap();
     assert_eq!(out.status.code(), Some(0), "{out:?}");
     assert!(out.stderr.is_empty(), "{out:?}");
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert_eq!(stdout, concat!("fairway ", env!("CARGO_PKG_VERSION"), "\n"));
-}
-
-#[test]
-fn an_unparsed_invocation_reports_failure() {
-    let out = fairway().arg("--no-such-flag").output().unwrap();
-    assert_eq!(out.status.code(), Some(2), "{out:?}");
-    assert!(out.stdout.is_empty(), "{out:?}");
-    let stderr = String::from_utf8(out.stderr).unwrap();
-    assert!(stderr.contains("--no-such-flag"), "{stderr:?}");
-    assert!(stderr.contains("Usage: fairway"), "{stderr:?}");
 }
