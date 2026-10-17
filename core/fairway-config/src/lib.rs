@@ -6,7 +6,7 @@
 //! #[derive(Default, Deserialize)]
 //! #[serde(crate = "fairway_codec::serde", default, deny_unknown_fields)]
 //! struct Settings {
-//!     enabled: bool,
+//!     alpha: bool,
 //! }
 //!
 //! fairway_config::namespace!(EXAMPLE: Settings, "example");
@@ -89,11 +89,7 @@ impl<T: Send + Sync + 'static> Namespace<T> {
     /// not been registered with `T`, the path is empty or traverses a non-table
     /// override, the value cannot be serialized, the resulting settings are
     /// invalid, or a file operation fails. Failed updates leave the file unchanged.
-    pub async fn set<V: Serialize>(
-        &'static self,
-        path: &[&str],
-        value: V,
-    ) -> Result<(), Error> {
+    pub async fn set<V: Serialize>(&'static self, path: &[&str], value: V) -> Result<(), Error> {
         let values = match CONFIG.get() {
             Some(Ok(values)) => values,
             _ => {

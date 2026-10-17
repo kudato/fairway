@@ -182,7 +182,7 @@ fairway_cli::command!(
 async fn failing(shutdown: Shutdown) -> anyhow::Result<()> {
     ready();
     shutdown.requested().await;
-    anyhow::bail!("cleanup failed");
+    anyhow::bail!("lorem ipsum");
 }
 fairway_cli::command!(
     CLI,
@@ -516,7 +516,7 @@ fn termination_signals_allow_cooperative_cleanup() {
     }
     let (output, _, _) = signalled("failing", "TERM");
     assert_eq!(output.status.code(), Some(1), "{output:?}");
-    assert!(String::from_utf8_lossy(&output.stderr).contains("error: cleanup failed"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("error: lorem ipsum"));
 }
 
 #[cfg(unix)]

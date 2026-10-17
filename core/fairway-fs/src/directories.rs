@@ -25,7 +25,7 @@ use crate::{Error, Operation};
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), fairway_fs::Error> {
 /// let directory = fairway_fs::temp_dir().await?;
-/// let path = directory.path().join("cache").join("images");
+/// let path = directory.path().join("alpha").join("beta");
 ///
 /// fairway_fs::mkdir(&path).await?;
 /// fairway_fs::mkdir(&path).await?;
@@ -60,7 +60,7 @@ pub async fn mkdir(path: impl AsRef<Path>) -> Result<(), Error> {
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), fairway_fs::Error> {
 /// let directory = fairway_fs::temp_dir().await?;
-/// let path = directory.path().join("notes.txt");
+/// let path = directory.path().join("example.txt");
 /// assert!(!fairway_fs::exists(&path).await?);
 ///
 /// fairway_fs::write(&path, String::new()).await?;
@@ -99,8 +99,8 @@ pub async fn exists(path: impl AsRef<Path>) -> Result<bool, Error> {
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), fairway_fs::Error> {
 /// let directory = fairway_fs::temp_dir().await?;
-/// let path = directory.path().join("notes.txt");
-/// fairway_fs::write(&path, "hello".to_owned()).await?;
+/// let path = directory.path().join("example.txt");
+/// fairway_fs::write(&path, "lorem".to_owned()).await?;
 ///
 /// let metadata = fairway_fs::metadata(&path).await?;
 /// assert!(metadata.is_file());

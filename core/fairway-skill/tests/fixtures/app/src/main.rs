@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use skill_fixture_notes as _;
+use skill_fixture_foo as _;
 use skill_fixture_plugin as _;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

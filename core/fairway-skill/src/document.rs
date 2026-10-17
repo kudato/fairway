@@ -145,13 +145,13 @@ mod tests {
 
     #[test]
     fn the_body_renders_as_written_and_keeps_file_lines() {
-        let text = "---\ndescription: x\n---\n\n  Hello, {{ name }}!\n";
+        let text = "---\ndescription: x\n---\n\n  Lorem, {{ ipsum }}!\n";
         let template = split(text).unwrap().template(ADDRESS).unwrap();
         assert_eq!(
             template
-                .render(std::collections::BTreeMap::from([("name", "Ann")]))
+                .render(std::collections::BTreeMap::from([("ipsum", "dolor")]))
                 .unwrap(),
-            "\n  Hello, Ann!\n"
+            "\n  Lorem, dolor!\n"
         );
         let error = template.render(()).unwrap_err();
         assert_eq!(error.line(), Some(5), "{error}");

@@ -236,24 +236,24 @@ fw::namespace!(CLI, "sample");
 #[derive(clap::Args)]
 struct Own {
     value: String,
-    #[arg(long)] port: u16,
+    #[arg(long)] count: u16,
     #[arg(long, default_value_t = 2)] workers: usize,
 }
 #[derive(clap::Args)]
-struct Status {
-    #[arg(long)] format: String,
+struct Bar {
+    #[arg(long)] label: String,
     #[arg(long, default_value_t = 3)] workers: usize,
 }
 async fn help(args: Own, _: fw::Shutdown) -> anyhow::Result<()> {
-    println!("OWN:{}:{}", args.value, args.port);
+    println!("OWN:{}:{}", args.value, args.count);
     Ok(())
 }
-async fn status(args: Status, _: fw::Shutdown) -> anyhow::Result<()> {
-    println!("STATUS:{}", args.format);
+async fn bar(args: Bar, _: fw::Shutdown) -> anyhow::Result<()> {
+    println!("BAR:{}", args.label);
     Ok(())
 }
-fw::command!(CLI, "status", "Status", status, long_about = "Show status.", workers = |args: &Status| {
-    println!("STATUS_WORKERS:{}", args.workers);
+fw::command!(CLI, "bar", "Bar", bar, long_about = "Show bar.", workers = |args: &Bar| {
+    println!("BAR_WORKERS:{}", args.workers);
     args.workers
 });
 fw::command!(CLI, "Sample", help, long_about = "Run the sample.", workers = |args: &Own| {
@@ -266,16 +266,16 @@ fw::command!(CLI, "Sample", help, long_about = "Run the sample.", workers = |arg
     successful(fixture.check(false));
     for (args, expected) in [
         (
-            vec!["sample", "value", "--port", "8080"],
-            "OWN_WORKERS:2\nOWN:value:8080\n",
+            vec!["sample", "value", "--count", "7"],
+            "OWN_WORKERS:2\nOWN:value:7\n",
         ),
         (
-            vec!["sample", "status", "--format", "short", "--workers", "4"],
-            "STATUS_WORKERS:4\nSTATUS:short\n",
+            vec!["sample", "bar", "--label", "foo", "--workers", "4"],
+            "BAR_WORKERS:4\nBAR:foo\n",
         ),
         (
-            vec!["sample", "--port", "8080", "--", "status"],
-            "OWN_WORKERS:2\nOWN:status:8080\n",
+            vec!["sample", "--count", "7", "--", "bar"],
+            "OWN_WORKERS:2\nOWN:bar:7\n",
         ),
     ] {
         let output = fixture.run(&args);
@@ -284,13 +284,13 @@ fw::command!(CLI, "Sample", help, long_about = "Run the sample.", workers = |arg
         assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
     }
     for (args, expected, absent) in [
-        (vec!["sample", "--help"], "--port", "--format"),
-        (vec!["sample", "status", "--help"], "--format", "--port"),
+        (vec!["sample", "--help"], "--count", "--label"),
+        (vec!["sample", "bar", "--help"], "--label", "--count"),
     ] {
         let output = fixture.run(&args);
         assert_eq!(output.status.code(), Some(0), "{args:?}: {output:?}");
         let help = String::from_utf8_lossy(&output.stdout);
-        assert!(help.contains("status"), "{help}");
+        assert!(help.contains("bar"), "{help}");
         assert!(help.contains(expected), "{help}");
         assert!(!help.contains(absent), "{help}");
         assert!(!help.contains("WORKERS:"), "{help}");
@@ -298,9 +298,9 @@ fw::command!(CLI, "Sample", help, long_about = "Run the sample.", workers = |arg
     for args in [
         vec!["sample"],
         vec!["sample", "value"],
-        vec!["sample", "status"],
-        vec!["sample", "--port", "8080", "status", "--format", "short"],
-        vec!["sample", "status", "--format", "short", "--port", "8080"],
+        vec!["sample", "bar"],
+        vec!["sample", "--count", "7", "bar", "--label", "foo"],
+        vec!["sample", "bar", "--label", "foo", "--count", "7"],
     ] {
         let output = fixture.run(&args);
         assert_eq!(output.status.code(), Some(2), "{args:?}: {output:?}");
@@ -546,7 +546,7 @@ fw::namespace!(OTHER, "another");
 fw::command!(OTHER, "Another namespace", fw::help, long_about = "Another namespace");
 fw::namespace!(HELPERS, "help-tools");
 fw::command!(HELPERS, "help", fw::help, long_about = "help");
-fw::namespace!(UNICODE, "café");
+fw::namespace!(UNICODE, "lorém");
 fw::command!(UNICODE, "Unicode namespace", fw::help, long_about = "Unicode namespace");
 #[derive(clap::Args)]
 struct Args { #[arg(long)] workers: usize }
@@ -556,12 +556,12 @@ fw::command!(CLI, "run", "Run", run, long_about = "Run", workers = |_: &Args| ->
 });
 fw::command!(OTHER, "run", "Same command name in another namespace", run, long_about = "Same command name in another namespace");
 fw::command!(HELPERS, "helpful", "help", run, long_about = "help");
-fw::command!(UNICODE, "данные-猫-🌍", "Unicode subcommand", run, long_about = "Unicode subcommand");
+fw::command!(UNICODE, "рыба-猫-🌍", "Unicode subcommand", run, long_about = "Unicode subcommand");
 "#,
     );
     successful(fixture.build(false));
     successful(fixture.check(false));
-    successful(fixture.run(&["café", "данные-猫-🌍", "--help"]));
+    successful(fixture.run(&["lorém", "рыба-猫-🌍", "--help"]));
 
     fixture.write("plugin-a/src/lib.rs", a);
     fixture.write("plugin-b/src/lib.rs", b);
@@ -594,7 +594,7 @@ use serde::Deserialize;
 struct Settings {}
 cfg::namespace!(FIRST: Settings, "first");
 cfg::namespace!(SECOND: Settings, "second");
-cfg::namespace!(UNICODE: Settings, "настройки.猫.🌍");
+cfg::namespace!(UNICODE: Settings, "лорем.猫.🌍");
 "#;
     let config_b = r#"#![deny(warnings)]
 #[derive(Default, serde::Deserialize)]

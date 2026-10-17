@@ -39,8 +39,8 @@ pub struct TempDir(Option<tempfile::TempDir>);
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), fairway_fs::Error> {
 /// let file = fairway_fs::temp_file().await?;
-/// fairway_fs::write(file.path(), "scratch".to_owned()).await?;
-/// assert_eq!(fairway_fs::read::<String>(file.path()).await?, "scratch");
+/// fairway_fs::write(file.path(), "lorem".to_owned()).await?;
+/// assert_eq!(fairway_fs::read::<String>(file.path()).await?, "lorem");
 /// file.close().await?;
 /// # Ok(())
 /// # }
@@ -76,8 +76,8 @@ pub async fn temp_file() -> Result<TempFile, Error> {
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), fairway_fs::Error> {
 /// let directory = fairway_fs::temp_dir().await?;
-/// let path = directory.path().join("draft.txt");
-/// fairway_fs::write(&path, "draft".to_owned()).await?;
+/// let path = directory.path().join("example.txt");
+/// fairway_fs::write(&path, "lorem".to_owned()).await?;
 ///
 /// directory.close().await?;
 /// assert!(!fairway_fs::exists(&path).await?);

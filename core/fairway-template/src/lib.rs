@@ -112,13 +112,13 @@ impl Template {
     /// use fairway_template::Template;
     /// use std::collections::BTreeMap;
     ///
-    /// let template = Template::compile("heading", "{{ title | default('Untitled') }}")?;
-    /// let context = BTreeMap::from([("title", "Report")]);
-    /// assert_eq!(template.render(&context)?, "Report");
-    /// assert_eq!(template.render(())?, "Untitled");
+    /// let template = Template::compile("example", "{{ foo | default('bar') }}")?;
+    /// let context = BTreeMap::from([("foo", "Lorem")]);
+    /// assert_eq!(template.render(&context)?, "Lorem");
+    /// assert_eq!(template.render(())?, "bar");
     /// for context in [Some(&context), None] {
     ///     let rendered = template.render(context)?;
-    ///     assert_eq!(rendered, if context.is_some() { "Report" } else { "Untitled" });
+    ///     assert_eq!(rendered, if context.is_some() { "Lorem" } else { "bar" });
     /// }
     /// # Ok::<(), fairway_template::Error>(())
     /// ```

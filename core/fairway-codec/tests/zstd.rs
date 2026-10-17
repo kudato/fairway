@@ -6,7 +6,7 @@ use fairway_codec::{Decode, Encode, Error, Json, Toml, Zstd};
 
 #[test]
 fn raw_buffers_round_trip_and_interoperate_with_standard_zstd_streams() {
-    for contents in [Vec::new(), (0..=255).collect(), b"hello\n".repeat(4096)] {
+    for contents in [Vec::new(), (0..=255).collect(), b"lorem\n".repeat(4096)] {
         let packed = Zstd(contents.clone()).encode().unwrap();
         assert_eq!(
             zstd::stream::decode_all(packed.as_slice()).unwrap(),
@@ -20,8 +20,8 @@ fn raw_buffers_round_trip_and_interoperate_with_standard_zstd_streams() {
         assert_eq!(restored.into_inner(), contents);
     }
 
-    let packed = Zstd("hello\n".to_owned()).encode().unwrap();
-    assert_eq!(Zstd::<String>::decode(packed).unwrap().as_ref(), "hello\n");
+    let packed = Zstd("lorem\n".to_owned()).encode().unwrap();
+    assert_eq!(Zstd::<String>::decode(packed).unwrap().as_ref(), "lorem\n");
 }
 
 #[test]
@@ -33,7 +33,7 @@ fn concatenated_frames_are_decoded_before_the_inner_format() {
 
 #[test]
 fn invalid_truncated_and_trailing_data_keep_the_decompression_error() {
-    let valid = Zstd(b"hello".to_vec()).encode().unwrap();
+    let valid = Zstd(b"lorem".to_vec()).encode().unwrap();
     let mut trailing = valid.clone();
     trailing.extend_from_slice(b"invalid tail");
     let inputs = [b"not zstd".to_vec(), trailing]
@@ -118,7 +118,7 @@ fn custom_codecs_need_only_one_direction_and_boxable_errors() {
     ));
 
     // Arrays implement Encode but not Decode, and their error is Infallible.
-    let packed = Zstd(*b"hello").encode().unwrap();
+    let packed = Zstd(*b"lorem").encode().unwrap();
     let error = Zstd::<DecodeOnly>::decode(packed).unwrap_err();
     assert!(matches!(error, Error::Decode { format: "zstd", .. }));
     let inner = error.source().unwrap().downcast_ref::<io::Error>().unwrap();

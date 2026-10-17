@@ -22,20 +22,20 @@ fn prepare(mode: &str, home: &Path, outside: &Path) {
                 &home.join("config.toml"),
                 &format!(
                     r#"[skill]
-skills_dir = "custom"
+skills_dir = "foo"
 "skill/alpha/example-skill" = "example-skill.md"
-"reference/alpha/example-reference" = "../shared/example-reference.md"
+"reference/alpha/example-reference" = "../bar/example-reference.md"
 "skill/рыба/текст" = {:?}
 "#,
                     outside.join("lorem.md").to_str().unwrap()
                 ),
             );
             write(
-                &home.join("custom/example-skill.md"),
+                &home.join("foo/example-skill.md"),
                 "---\ndescription: Lorem ipsum.\n---\n# Lorem ipsum\n\n{{ ipsum }}",
             );
             write(
-                &home.join("shared/example-reference.md"),
+                &home.join("bar/example-reference.md"),
                 "Dolor {{ word }}.\n",
             );
             write(
@@ -50,7 +50,7 @@ skills_dir = "custom"
             );
             write(
                 &home.join("skills/lorem/example-skill.md"),
-                "---\ndescription: From skills.\n---\nBody\n",
+                "---\ndescription: Sed do.\n---\nBody\n",
             );
         }
         "invalid" => {

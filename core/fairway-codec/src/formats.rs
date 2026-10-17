@@ -29,15 +29,15 @@ use crate::{
 /// #[derive(Deserialize, Serialize)]
 /// struct Settings {
 ///     name: String,
-///     retries: u32,
+///     count: u32,
 /// }
 ///
-/// let bytes = br#"{ "name": "example", "retries": 3 }"#.to_vec();
+/// let bytes = br#"{ "name": "example", "count": 3 }"#.to_vec();
 /// let Json(mut settings) = Json::<Settings>::decode(bytes)?;
-/// settings.retries += 1;
+/// settings.count += 1;
 /// assert_eq!(
 ///     Json(&settings).encode()?,
-///     b"{\"name\":\"example\",\"retries\":4}\n"
+///     b"{\"name\":\"example\",\"count\":4}\n"
 /// );
 /// # Ok::<(), fairway_codec::Error>(())
 /// ```
@@ -47,8 +47,8 @@ use crate::{
 /// ```
 /// use fairway_codec::{Decode, Json};
 ///
-/// let Json(value): Json = Json::decode(br#"{ "tags": ["a", "b"] }"#.to_vec())?;
-/// assert_eq!(value["tags"][1], "b");
+/// let Json(value): Json = Json::decode(br#"{ "foo": ["a", "b"] }"#.to_vec())?;
+/// assert_eq!(value["foo"][1], "b");
 /// # Ok::<(), fairway_codec::Error>(())
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,15 +129,15 @@ impl<T: Serialize> Encode for Json<T> {
 /// #[derive(Deserialize, Serialize)]
 /// struct Record {
 ///     name: String,
-///     tags: Vec<String>,
+///     items: Vec<String>,
 /// }
 ///
-/// let bytes = b"# Example\nname = \"alpha\"\ntags = []\n".to_vec();
+/// let bytes = b"# Example\nname = \"alpha\"\nitems = []\n".to_vec();
 /// let Toml(mut record) = Toml::<Record>::decode(bytes)?;
-/// record.tags.push("text".to_owned());
+/// record.items.push("beta".to_owned());
 /// assert_eq!(
 ///     Toml(&record).encode()?,
-///     b"name = \"alpha\"\ntags = [\"text\"]\n"
+///     b"name = \"alpha\"\nitems = [\"beta\"]\n"
 /// );
 /// # Ok::<(), fairway_codec::Error>(())
 /// ```
@@ -221,8 +221,8 @@ impl<T: Serialize> Encode for Toml<T> {
 /// ```
 /// use fairway_codec::{Decode, Encode, Yaml};
 ///
-/// let Yaml(mut names): Yaml<Vec<String>> = Yaml::decode(b"- cat\n".to_vec())?;
-/// names.push("dog".to_owned());
+/// let Yaml(mut names): Yaml<Vec<String>> = Yaml::decode(b"- alpha\n".to_vec())?;
+/// names.push("beta".to_owned());
 /// let bytes = Yaml(&names).encode()?;
 /// assert_eq!(Yaml::<Vec<String>>::decode(bytes)?.into_inner(), names);
 /// # Ok::<(), fairway_codec::Error>(())
@@ -367,7 +367,7 @@ impl Markdown {
     /// use fairway_codec::Markdown;
     ///
     /// let events: Vec<_> = {
-    ///     let document = Markdown::parse("# Heading\n".to_owned());
+    ///     let document = Markdown::parse("# Lorem ipsum\n".to_owned());
     ///     document.events().map(|event| event.into_static()).collect()
     /// };
     /// // The start of the heading, its text, and its end.

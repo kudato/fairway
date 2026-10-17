@@ -193,7 +193,7 @@ mod tests {
         let readonly = File::open(output.lock.as_ref().unwrap().path())?;
         output.output = Some(readonly);
         let error = blocking(Operation::Write, Some(path.clone()), move || {
-            output.commit(b"cannot write this".to_vec())
+            output.commit(b"Lorem ipsum dolor sit amet.".to_vec())
         })
         .await
         .unwrap_err();
@@ -241,9 +241,12 @@ mod tests {
                 .create_new(true)
                 .open(&reservation)
                 .unwrap();
-            next.write_all(b"next operation").unwrap();
+            next.write_all(b"Consectetur adipiscing elit.").unwrap();
             output.abort();
-            assert_eq!(std::fs::read(&reservation).unwrap(), b"next operation");
+            assert_eq!(
+                std::fs::read(&reservation).unwrap(),
+                b"Consectetur adipiscing elit."
+            );
             drop(next);
             std::fs::remove_file(reservation).unwrap();
             Ok(())

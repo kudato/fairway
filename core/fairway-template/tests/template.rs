@@ -14,11 +14,11 @@ use fairway_template::{Error, ErrorKind, Template};
 #[test]
 fn empty_and_optional_contexts_still_execute_the_template() {
     let template = Template::compile(
-        "heading",
-        "{# hidden comment #}{{ title | default('Untitled') }}:{{ 1 + 2 }}",
+        "alpha",
+        "{# lorem ipsum #}{{ foo | default('bar') }}:{{ 1 + 2 }}",
     )
     .unwrap();
-    let empty = "Untitled:3";
+    let empty = "bar:3";
     assert_eq!(template.render(()).unwrap(), empty);
     assert_eq!(template.render(json!(null)).unwrap(), empty);
     assert_eq!(
@@ -30,7 +30,7 @@ fn empty_and_optional_contexts_still_execute_the_template() {
         empty
     );
 
-    let context = BTreeMap::from([("title", "Lorem")]);
+    let context = BTreeMap::from([("foo", "Lorem")]);
     for context in [Some(&context), None] {
         let expected = if context.is_some() { "Lorem:3" } else { empty };
         assert_eq!(template.render(context).unwrap(), expected);
@@ -41,20 +41,20 @@ fn empty_and_optional_contexts_still_execute_the_template() {
 fn exposes_named_and_nested_values_without_a_prefix() {
     let template = Template::compile(
         "context",
-        "{{ project.name }}:{{ files | join(', ') }}:{{ count }}:{{ active }}:{{ data }}",
+        "{{ alpha.beta }}:{{ items | join(', ') }}:{{ count }}:{{ active }}:{{ data }}",
     )
     .unwrap();
     assert_eq!(
         template
             .render(json!({
-                "project": { "name": "example" },
-                "files": ["one.rs", "two.rs"],
+                "alpha": { "beta": "example" },
+                "items": ["foo", "bar"],
                 "count": 2,
                 "active": true,
                 "data": "ordinary field",
             }))
             .unwrap(),
-        "example:one.rs, two.rs:2:True:ordinary field",
+        "example:foo, bar:2:True:ordinary field",
     );
 }
 
@@ -77,27 +77,27 @@ fn rejects_roots_without_named_fields() {
 
 #[test]
 fn distinguishes_missing_null_and_empty_fields() {
-    let template = Template::compile("default", "{{ title | default('Untitled') }}").unwrap();
+    let template = Template::compile("default", "{{ foo | default('bar') }}").unwrap();
     for (context, expected) in [
-        (json!({}), "Untitled"),
-        (json!({ "title": "Lorem" }), "Lorem"),
-        (json!({ "title": "" }), ""),
-        (json!({ "title": null }), "None"),
-        (json!({ "title": false }), "False"),
-        (json!({ "title": 0 }), "0"),
+        (json!({}), "bar"),
+        (json!({ "foo": "Lorem" }), "Lorem"),
+        (json!({ "foo": "" }), ""),
+        (json!({ "foo": null }), "None"),
+        (json!({ "foo": false }), "False"),
+        (json!({ "foo": 0 }), "0"),
     ] {
         assert_eq!(template.render(context).unwrap(), expected);
     }
 
     #[derive(Serialize)]
     #[serde(crate = "fairway_codec::serde")]
-    struct Heading<'a> {
-        title: Option<&'a str>,
+    struct Record<'a> {
+        foo: Option<&'a str>,
     }
-    assert_eq!(template.render(Heading { title: None }).unwrap(), "None");
+    assert_eq!(template.render(Record { foo: None }).unwrap(), "None");
 
-    let template = Template::compile("default", "{{ title | default('Untitled', true) }}").unwrap();
-    for title in [
+    let template = Template::compile("default", "{{ foo | default('bar', true) }}").unwrap();
+    for foo in [
         json!(null),
         json!(""),
         json!(false),
@@ -105,10 +105,7 @@ fn distinguishes_missing_null_and_empty_fields() {
         json!([]),
         json!({}),
     ] {
-        assert_eq!(
-            template.render(json!({ "title": title })).unwrap(),
-            "Untitled"
-        );
+        assert_eq!(template.render(json!({ "foo": foo })).unwrap(), "bar");
     }
 }
 
@@ -121,7 +118,7 @@ fn missing_values_fail_only_when_the_expression_is_executed() {
             "{% for item in missing %}{{ item }}{% endfor %}",
             ErrorKind::Undefined,
         ),
-        ("{{ project.name }}", ErrorKind::Undefined),
+        ("{{ alpha.beta }}", ErrorKind::Undefined),
         // MiniJinja reports undefined arithmetic as an invalid operation.
         ("{{ missing + 1 }}", ErrorKind::Render),
     ] {
@@ -131,7 +128,7 @@ fn missing_values_fail_only_when_the_expression_is_executed() {
 
     for source in [
         "{% if false %}{{ missing }}{% endif %}",
-        "{% if files is defined and files %}{{ files | join(', ') }}{% endif %}",
+        "{% if items is defined and items %}{{ items | join(', ') }}{% endif %}",
     ] {
         assert_eq!(
             Template::compile("guarded", source)
@@ -175,8 +172,8 @@ fn preserves_literal_text_and_explicit_whitespace_control() {
     }
     let template = Template::compile("crlf", "  {{ text }}\r\n").unwrap();
     assert_eq!(
-        template.render(json!({ "text": "hi" })).unwrap(),
-        "  hi\r\n"
+        template.render(json!({ "text": "foo" })).unwrap(),
+        "  foo\r\n"
     );
     let template = Template::compile("blocks", "one\n{% if true %}\n  two\n{% endif %}\n").unwrap();
     assert_eq!(template.render(()).unwrap(), "one\n\n  two\n\n");
@@ -354,9 +351,9 @@ fn reports_owned_diagnostics_and_recovers_after_render_errors() {
     .join()
     .unwrap();
 
-    let template = Template::compile("filter", "{{ title | nonexistent_filter }}").unwrap();
+    let template = Template::compile("filter", "{{ foo | nonexistent_filter }}").unwrap();
     assert_eq!(
-        template.render(json!({ "title": "x" })).unwrap_err().kind(),
+        template.render(json!({ "foo": "x" })).unwrap_err().kind(),
         ErrorKind::Render
     );
 }

@@ -219,12 +219,12 @@ mod tests {
     #[test]
     fn queue_keys_use_canonical_caseless_matching_for_the_whole_path() {
         for (first, second) in [
-            ("Projects/Report", "projects/report"),
-            ("dir/straße", "DIR/STRAẞE"),
-            ("dir/straße", "dir/STRASSE"),
+            ("Alpha/Beta", "alpha/beta"),
+            ("dir/fooße", "DIR/FOOẞE"),
+            ("dir/fooße", "dir/FOOSSE"),
             ("dir/xΣ", "dir/xς"),
             ("dir/xσ", "dir/xς"),
-            ("CAFÉ/data", "cafe\u{301}/data"),
+            ("FOOÉ/data", "fooe\u{301}/data"),
         ] {
             assert_eq!(
                 key(Path::new(first)),
@@ -233,15 +233,15 @@ mod tests {
             );
         }
         assert_ne!(key(Path::new("one/data")), key(Path::new("two/data")));
-        assert_ne!(key(Path::new("dir/cafe")), key(Path::new("dir/café")));
+        assert_ne!(key(Path::new("dir/fooe")), key(Path::new("dir/fooé")));
 
         // Bytes that are not UTF-8 are kept, and the text around them is folded.
         #[cfg(unix)]
         {
             use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
             let path = |bytes| Path::new(OsStr::from_bytes(bytes));
-            assert_eq!(key(path(b"dir/\xffReport")), key(path(b"DIR/\xffREPORT")));
-            assert_ne!(key(path(b"dir/\xffReport")), key(path(b"dir/\xfeReport")));
+            assert_eq!(key(path(b"dir/\xffAlpha")), key(path(b"DIR/\xffALPHA")));
+            assert_ne!(key(path(b"dir/\xffAlpha")), key(path(b"dir/\xfeAlpha")));
         }
     }
 
@@ -251,7 +251,7 @@ mod tests {
         let first = directory.path().join("first");
         let other = directory.path().join("other");
         let reservation = adjacent(&first);
-        std::fs::write(&reservation, "held by another process")?;
+        std::fs::write(&reservation, "Lorem ipsum dolor sit amet.")?;
         let mut waiting = Box::pin(acquire(&first, true));
         assert!(
             tokio::time::timeout(Duration::from_millis(80), &mut waiting)

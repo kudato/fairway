@@ -29,9 +29,9 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// ```
 /// use fairway_codec::{Decode, Encode, Zstd};
 ///
-/// let packed = Zstd("hello".to_owned()).encode()?;
+/// let packed = Zstd("lorem".to_owned()).encode()?;
 /// let Zstd(text) = Zstd::<String>::decode(packed)?;
-/// assert_eq!(text, "hello");
+/// assert_eq!(text, "lorem");
 /// # Ok::<(), fairway_codec::Error>(())
 /// ```
 ///

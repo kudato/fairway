@@ -8,12 +8,12 @@ use tempfile::TempDir;
 use super::*;
 use crate::Namespace;
 
-static TABLE: Namespace<toml::Table> = Namespace::new("settings");
+static TABLE: Namespace<toml::Table> = Namespace::new("alpha");
 static TABLE_REGISTRATION: Registration = Registration::new(&TABLE, "test table");
 
-static QUOTED: Namespace<toml::Table> = Namespace::new("settings.named");
+static QUOTED: Namespace<toml::Table> = Namespace::new("alpha.beta");
 static QUOTED_REGISTRATION: Registration = Registration::new(&QUOTED, "quoted name");
-static UPPER: Namespace<toml::Table> = Namespace::new("Settings");
+static UPPER: Namespace<toml::Table> = Namespace::new("Alpha");
 static UPPER_REGISTRATION: Registration = Registration::new(&UPPER, "case-sensitive name");
 
 #[tokio::test]
@@ -23,11 +23,11 @@ async fn namespace_names_are_literal_and_paths_remain_unexpanded() {
         home.path(),
         "config.toml",
         r#"
-["settings.named"]
-path = "$HOME/~/relative"
-[settings.named]
+["alpha.beta"]
+foo = "$HOME/~/lorem"
+[alpha.beta]
 value = "nested"
-[Settings]
+[Alpha]
 value = "uppercase"
 "#,
     );
@@ -41,17 +41,15 @@ value = "uppercase"
     )
     .await
     .unwrap();
-    let literal = values["settings.named"]
-        .downcast_ref::<toml::Table>()
-        .unwrap();
-    assert_eq!(literal["path"].as_str(), Some("$HOME/~/relative"));
+    let literal = values["alpha.beta"].downcast_ref::<toml::Table>().unwrap();
+    assert_eq!(literal["foo"].as_str(), Some("$HOME/~/lorem"));
     assert_eq!(literal.len(), 1);
     assert_eq!(
-        values["settings"].downcast_ref::<toml::Table>().unwrap()["named"]["value"].as_str(),
+        values["alpha"].downcast_ref::<toml::Table>().unwrap()["beta"]["value"].as_str(),
         Some("nested")
     );
     assert_eq!(
-        values["Settings"].downcast_ref::<toml::Table>().unwrap()["value"].as_str(),
+        values["Alpha"].downcast_ref::<toml::Table>().unwrap()["value"].as_str(),
         Some("uppercase")
     );
 }
@@ -65,7 +63,7 @@ fn write(home: &Path, relative: &str, text: impl AsRef<[u8]>) {
 async fn table(home: &Path) -> Result<toml::Table, Error> {
     let mut values = load(home, vec![&TABLE_REGISTRATION]).await?;
     Ok(*values
-        .remove("settings")
+        .remove("alpha")
         .unwrap()
         .downcast::<toml::Table>()
         .unwrap())
@@ -102,11 +100,11 @@ async fn loading_creates_only_the_automatic_template_and_preserves_existing_file
         template
     );
     fs::remove_file(home.join("config.toml")).unwrap();
-    write(&home, "conf.d/nested/value.toml", "[settings]\nvalue = 3\n");
+    write(&home, "conf.d/nested/value.toml", "[alpha]\nvalue = 3\n");
     assert_eq!(table(&home).await.unwrap()["value"].as_integer(), Some(3));
     assert!(!home.join("config.toml").exists());
     fs::remove_dir_all(home.join("conf.d")).unwrap();
-    let existing = "# existing file\n[settings]\nvalue = 4\n";
+    let existing = "# existing file\n[alpha]\nvalue = 4\n";
     write(&home, "config.auto.toml", existing);
     assert_eq!(table(&home).await.unwrap()["value"].as_integer(), Some(4));
     assert_eq!(
@@ -121,15 +119,15 @@ async fn loading_creates_only_the_automatic_template_and_preserves_existing_file
 async fn paths_define_precedence_including_nested_and_hidden_sources() {
     let home = TempDir::new().unwrap();
     let root = home.path();
-    write(root, "config.toml", "[settings]\nvalue = 0\nkeep = true\n");
-    write(root, "conf.d/z/00-first.toml", "[settings]\nvalue = 5\n");
-    write(root, "conf.d/a/99-last.toml", "[settings]\nvalue = 4\n");
-    write(root, "conf.d/2.toml", "[settings]\nvalue = 3\n");
-    write(root, "conf.d/10.toml", "[settings]\nvalue = 2\n");
+    write(root, "config.toml", "[alpha]\nvalue = 0\nkeep = true\n");
+    write(root, "conf.d/z/00-first.toml", "[alpha]\nvalue = 5\n");
+    write(root, "conf.d/a/99-last.toml", "[alpha]\nvalue = 4\n");
+    write(root, "conf.d/2.toml", "[alpha]\nvalue = 3\n");
+    write(root, "conf.d/10.toml", "[alpha]\nvalue = 2\n");
     write(
         root,
-        "conf.d/.hidden/.settings.toml",
-        "[settings]\nhidden = true\n",
+        "conf.d/.hidden/.alpha.toml",
+        "[alpha]\nhidden = true\n",
     );
     write(root, "conf.d/ignored.TOML", "not valid TOML");
     write(root, "conf.d/ignored.toml.bak", "not valid TOML");
@@ -141,7 +139,7 @@ async fn paths_define_precedence_including_nested_and_hidden_sources() {
     assert_eq!(
         relative,
         [
-            ".hidden/.settings.toml",
+            ".hidden/.alpha.toml",
             "10.toml",
             "2.toml",
             "a/99-last.toml",
@@ -162,16 +160,16 @@ async fn tables_merge_recursively_and_arrays_and_other_values_replace() {
         home.path(),
         "config.toml",
         r#"
-[settings]
+[alpha]
 numbers = [1, 2]
 empty = [1]
-records = [{name = "old", keep = true}]
+tables = [{foo = "old", keep = true}]
 scalar = 1
 map = {value = 1}
-[settings.nested]
+[alpha.nested]
 keep = true
 value = 1
-[settings.unchanged]
+[alpha.unchanged]
 keep = true
 "#,
     );
@@ -179,22 +177,22 @@ keep = true
         home.path(),
         "conf.d/change.toml",
         r#"
-[settings]
+[alpha]
 numbers = [3]
 empty = []
-records = [{name = "new"}]
+tables = [{foo = "new"}]
 scalar = {value = 2}
 map = "replaced"
-[settings.nested]
+[alpha.nested]
 value = 2
-[settings.unchanged]
+[alpha.unchanged]
 "#,
     );
     let actual = table(home.path()).await.unwrap();
     let expected = fairway_codec::toml! {
         numbers = [3]
         empty = []
-        records = [{name = "new"}]
+        tables = [{foo = "new"}]
         scalar = {value = 2}
         map = "replaced"
         nested = {keep = true, value = 2}
@@ -206,20 +204,20 @@ value = 2
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(crate = "fairway_codec::serde", default, deny_unknown_fields)]
 struct Settings {
-    name: String,
-    count: u64,
+    foo: String,
+    bar: u64,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            name: "lorem".into(),
-            count: 7,
+            foo: "lorem".into(),
+            bar: 7,
         }
     }
 }
 
-static SETTINGS: Namespace<Settings> = Namespace::new("settings");
+static SETTINGS: Namespace<Settings> = Namespace::new("alpha");
 static SETTINGS_REGISTRATION: Registration = Registration::new(&SETTINGS, "test settings");
 
 #[derive(Default, Deserialize)]
@@ -343,8 +341,8 @@ async fn every_document_is_parsed_even_without_registrations_or_before_an_overri
         }
         write(home.path(), relative, "");
     }
-    write(home.path(), "conf.d/a.toml", "[settings\n");
-    write(home.path(), "conf.d/b.toml", "[settings]\nvalue = 5\n");
+    write(home.path(), "conf.d/a.toml", "[alpha\n");
+    write(home.path(), "conf.d/b.toml", "[alpha]\nvalue = 5\n");
     let error = table(home.path()).await.unwrap_err();
     assert!(error.to_string().contains("a.toml"));
 }
@@ -353,7 +351,7 @@ async fn every_document_is_parsed_even_without_registrations_or_before_an_overri
 async fn unknown_top_level_names_are_errors_in_each_file() {
     for relative in [
         "config.toml",
-        "conf.d/nested/settings.toml",
+        "conf.d/nested/alpha.toml",
         "config.auto.toml",
     ] {
         for namespaces in [vec![], vec![&TABLE_REGISTRATION]] {
@@ -362,18 +360,18 @@ async fn unknown_top_level_names_are_errors_in_each_file() {
             write(home.path(), relative, "");
             load(home.path(), namespaces.clone()).await.unwrap();
             for text in [
-                "[setings]\n",
-                "[setings]\nvalue = 1\n",
-                "[setings.nested]\nvalue = 1\n",
-                "setings = 1\n",
-                "[[setings]]\nvalue = 1\n",
+                "[alpa]\n",
+                "[alpa]\nvalue = 1\n",
+                "[alpa.nested]\nvalue = 1\n",
+                "alpa = 1\n",
+                "[[alpa]]\nvalue = 1\n",
             ] {
                 write(home.path(), relative, text);
                 let error = load(home.path(), namespaces.clone()).await.unwrap_err();
                 assert_eq!(
                     error.to_string(),
                     format!(
-                        "{}: unknown configuration namespace \"setings\"",
+                        "{}: unknown configuration namespace \"alpa\"",
                         path.display(),
                     ),
                     "{text}",
@@ -386,12 +384,12 @@ async fn unknown_top_level_names_are_errors_in_each_file() {
 #[tokio::test]
 async fn every_registered_section_must_be_a_table() {
     let home = TempDir::new().unwrap();
-    write(home.path(), "conf.d/fix.toml", "[settings]\nvalue = 1\n");
+    write(home.path(), "conf.d/fix.toml", "[alpha]\nvalue = 1\n");
     for value in ["false", "1", "[]", "'text'", "[{value = 2}]"] {
-        write(home.path(), "config.toml", format!("settings = {value}\n"));
+        write(home.path(), "config.toml", format!("alpha = {value}\n"));
         let error = table(home.path()).await.unwrap_err().to_string();
         assert!(
-            error.contains("settings") && error.contains("must be a table"),
+            error.contains("alpha") && error.contains("must be a table"),
             "{error}"
         );
     }
@@ -400,8 +398,8 @@ async fn every_registered_section_must_be_a_table() {
 #[tokio::test]
 async fn errors_retain_sources_and_name_every_contributing_file() {
     let home = TempDir::new().unwrap();
-    write(home.path(), "config.toml", "[settings]\nname = 'ipsum'\n");
-    for text in ["[settings]\ncount = -1\n", "[settings]\nunknown = true\n"] {
+    write(home.path(), "config.toml", "[alpha]\nfoo = 'ipsum'\n");
+    for text in ["[alpha]\nbar = -1\n", "[alpha]\nunknown = true\n"] {
         write(home.path(), "conf.d/bad.toml", text);
         let error = load(home.path(), vec![&SETTINGS_REGISTRATION])
             .await
@@ -409,7 +407,7 @@ async fn errors_retain_sources_and_name_every_contributing_file() {
         let error = error.clone();
         assert!(error.to_string().contains("config.toml"));
         assert!(error.to_string().contains("bad.toml"));
-        assert!(error.to_string().contains("settings"));
+        assert!(error.to_string().contains("alpha"));
         assert!(
             error
                 .source()
@@ -444,7 +442,7 @@ async fn a_file_in_place_of_conf_d_and_a_disappeared_selected_file_are_errors() 
             .contains("conf.d")
     );
     fs::remove_file(home.path().join("conf.d")).unwrap();
-    write(home.path(), "conf.d/gone.toml", "[settings]\n");
+    write(home.path(), "conf.d/gone.toml", "[alpha]\n");
     let paths = additional(&home.path().join("conf.d")).await.unwrap();
     fs::remove_file(&paths[0]).unwrap();
     assert!(read(&paths[0], false).await.is_err());
@@ -456,16 +454,16 @@ async fn links_allow_external_sources_and_aliases_but_reject_cycles() {
     use std::os::unix::fs::symlink;
     let home = TempDir::new().unwrap();
     let external = TempDir::new().unwrap();
-    write(external.path(), "settings.toml", "[settings]\nvalue = 1\n");
+    write(external.path(), "alpha.toml", "[alpha]\nvalue = 1\n");
     fs::create_dir(home.path().join("conf.d")).unwrap();
     symlink(external.path(), home.path().join("conf.d/a")).unwrap();
     symlink(external.path(), home.path().join("conf.d/c")).unwrap();
     symlink(
-        external.path().join("settings.toml"),
+        external.path().join("alpha.toml"),
         home.path().join("config.toml"),
     )
     .unwrap();
-    write(home.path(), "conf.d/b.toml", "[settings]\nvalue = 2\n");
+    write(home.path(), "conf.d/b.toml", "[alpha]\nvalue = 2\n");
     assert_eq!(
         table(home.path()).await.unwrap()["value"].as_integer(),
         Some(1)
@@ -567,10 +565,10 @@ async fn windows_junctions_follow_logical_precedence_and_reject_cycles() {
     let home = TempDir::new().unwrap();
     let external = TempDir::new().unwrap();
     fs::create_dir(home.path().join("conf.d")).unwrap();
-    write(external.path(), "settings.toml", "[settings]\nvalue = 1\n");
+    write(external.path(), "alpha.toml", "[alpha]\nvalue = 1\n");
     junction(external.path(), &home.path().join("conf.d/a"));
     junction(external.path(), &home.path().join("conf.d/c"));
-    write(home.path(), "conf.d/b.toml", "[settings]\nvalue = 2\n");
+    write(home.path(), "conf.d/b.toml", "[alpha]\nvalue = 2\n");
     assert_eq!(
         table(home.path()).await.unwrap()["value"].as_integer(),
         Some(1)

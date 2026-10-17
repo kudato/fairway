@@ -150,10 +150,10 @@ mod tests {
                 "alpha/example-skill",
             ),
             (
-                "reference/рыба/lorem.v2_final-1",
+                "reference/рыба/lorem.ipsum2_dolor-1",
                 Kind::Reference,
                 "рыба",
-                "рыба/lorem.v2_final-1",
+                "рыба/lorem.ipsum2_dolor-1",
             ),
             // Parts are literal, so dots are not path components.
             ("skill/../..", Kind::Skill, "..", "../.."),

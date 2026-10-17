@@ -14,12 +14,12 @@ fn raw_data_is_owned_and_custom_errors_need_no_io_conversion() {
     assert_eq!(bytes.unwrap(), [0, 255]);
     let bytes: Result<_, Infallible> = vec![0_u8, 255].encode();
     assert_eq!(bytes.unwrap(), [0, 255]);
-    let text: Result<_, Infallible> = "hello".to_owned().encode();
-    assert_eq!(text.unwrap(), b"hello");
+    let text: Result<_, Infallible> = "lorem".to_owned().encode();
+    assert_eq!(text.unwrap(), b"lorem");
     let array: Result<_, Infallible> = [0_u8, 255].encode();
     assert_eq!(array.unwrap(), [0, 255]);
-    let markdown: Result<_, Infallible> = Markdown::parse("# hello".to_owned()).encode();
-    assert_eq!(markdown.unwrap(), b"# hello");
+    let markdown: Result<_, Infallible> = Markdown::parse("# lorem".to_owned()).encode();
+    assert_eq!(markdown.unwrap(), b"# lorem");
 
     struct Custom;
     impl Decode for Custom {
@@ -53,7 +53,7 @@ fn format_errors_retain_format_position_and_source() {
     ));
     assert!(Json::<u32>::decode(b"1 2".to_vec()).is_err());
     assert_eq!(Json::<u32>::decode(b"1 \r\n\t".to_vec()).unwrap().0, 1);
-    let error = Toml::<toml::Table>::decode(b"name = 'x'\nfiles = [".to_vec()).unwrap_err();
+    let error = Toml::<toml::Table>::decode(b"name = 'x'\nfoo = [".to_vec()).unwrap_err();
     assert!(matches!(
         error,
         Error::Decode {
@@ -94,7 +94,7 @@ fn markdown_traversals_are_independent_and_can_stop_early() {
 
     // The reference definition follows the link, so every traversal has to
     // resolve it from the whole document.
-    let source = "# Heading\n\n[link][id] and *emphasis*\n\n[id]: /target\n";
+    let source = "# Lorem\n\n[ipsum][id] dolor *sit*\n\n[id]: /example\n";
     let document = Markdown::parse(source.to_owned());
     let mut first = document.events();
     assert!(matches!(
@@ -104,11 +104,11 @@ fn markdown_traversals_are_independent_and_can_stop_early() {
             ..
         }))
     ));
-    let expected = "<h1>Heading</h1>\n<p><a href=\"/target\">link</a> and <em>emphasis</em></p>\n";
+    let expected = "<h1>Lorem</h1>\n<p><a href=\"/example\">ipsum</a> dolor <em>sit</em></p>\n";
     let mut html = String::new();
     pulldown_cmark::html::push_html(&mut html, document.events());
     assert_eq!(html, expected);
-    assert_eq!(first.next(), Some(Event::Text("Heading".into())));
+    assert_eq!(first.next(), Some(Event::Text("Lorem".into())));
     drop(first);
 
     let clone = document.clone();
@@ -120,8 +120,8 @@ fn markdown_traversals_are_independent_and_can_stop_early() {
 
     // Traversal may normalize the text it yields, but never the stored source.
     for text in [
-        "4\\. This is text, not a list\n",
-        "# Кот\r\n\r\n\tКод\r\n\r\n*курсив* и _курсив_  \r\n",
+        "4\\. Lorem ipsum dolor sit amet.\n",
+        "# Кот\r\n\r\n\tрыба\r\n\r\n*лорем* ипсум _долор_  \r\n",
     ] {
         let document = Markdown::parse(text.to_owned());
         document.events().for_each(|event| {
@@ -136,8 +136,8 @@ fn markdown_traversals_are_independent_and_can_stop_early() {
 fn markdown_follows_plain_commonmark_without_extensions() {
     use fairway_codec::markdown::{Event, Tag};
 
-    let source = "---\ntitle: front matter\n---\n\n~~struck~~ and a footnote[^1]\n\n\
-                  - [x] task\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n[^1]: The note.\n";
+    let source = "---\nfoo: bar\n---\n\n~~lorem~~ ipsum dolor[^1]\n\n\
+                  - [x] sit\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n[^1]: Sit amet.\n";
     let document = Markdown::parse(source.to_owned());
     let events: Vec<_> = document.events().collect();
     for event in &events {
@@ -163,7 +163,7 @@ fn markdown_follows_plain_commonmark_without_extensions() {
             _ => None,
         })
         .collect();
-    for literal in ["~~struck~~", "[x] task", "| a | b |", "[^1]: The note."] {
+    for literal in ["~~lorem~~", "[x] sit", "| a | b |", "[^1]: Sit amet."] {
         assert!(text.contains(literal), "{literal:?} in {text:?}");
     }
 }
@@ -184,9 +184,9 @@ fn default_formats_and_construction_use_only_codec_api() {
     assert_eq!(value.as_ref()["items"][1], 2);
     assert_eq!(Json(vec![1, 2]).encode().unwrap(), b"[1,2]\n");
     let mut config: Toml = Toml::decode(b"name = 'example'".to_vec()).unwrap();
-    config.0["name"] = toml::Value::String("updated".into());
+    config.0["name"] = toml::Value::String("alpha".into());
     let config: Toml = Toml::decode(config.encode().unwrap()).unwrap();
-    assert_eq!(config.into_inner()["name"].as_str(), Some("updated"));
+    assert_eq!(config.into_inner()["name"].as_str(), Some("alpha"));
     let table = toml! { count = 3 };
     assert_eq!(table["count"].as_integer(), Some(3));
 }

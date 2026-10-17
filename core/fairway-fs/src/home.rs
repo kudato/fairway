@@ -70,9 +70,9 @@ pub(crate) fn initialize() -> Result<(), Error> {
 /// ```no_run
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), fairway_fs::Error> {
-/// let data = fairway_fs::home().await?.join("my-plugin");
+/// let data = fairway_fs::home().await?.join("example");
 /// fairway_fs::mkdir(&data).await?;
-/// fairway_fs::write(data.join("state.json"), "{}".to_owned()).await?;
+/// fairway_fs::write(data.join("example.json"), "{}".to_owned()).await?;
 /// # Ok(())
 /// # }
 /// ```

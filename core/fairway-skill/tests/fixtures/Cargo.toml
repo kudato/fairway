@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["plugin", "notes", "app"]
+members = ["plugin", "foo", "app"]
 
 [workspace.dependencies]
 skill = { package = "fairway-skill", path = "../.." }

@@ -40,14 +40,8 @@ impl Fixture {
                 "plugin/skills/other-skill.md",
                 include_str!("fixtures/plugin/skills/other-skill.md"),
             ),
-            (
-                "notes/Cargo.toml",
-                include_str!("fixtures/notes/Cargo.toml"),
-            ),
-            (
-                "notes/src/lib.rs",
-                include_str!("fixtures/notes/src/lib.rs"),
-            ),
+            ("foo/Cargo.toml", include_str!("fixtures/foo/Cargo.toml")),
+            ("foo/src/lib.rs", include_str!("fixtures/foo/src/lib.rs")),
             ("app/Cargo.toml", include_str!("fixtures/app/Cargo.toml")),
             ("app/src/main.rs", include_str!("fixtures/app/src/main.rs")),
         ] {
@@ -231,12 +225,12 @@ fn builtins_are_embedded_checked_and_overridden() {
         "plugin/src/lib.rs",
         include_str!("fixtures/plugin/src/lib.rs"),
     );
-    fixture.write("notes/src/lib.rs", "skill::namespace!(\"alpha\");\n");
+    fixture.write("foo/src/lib.rs", "skill::namespace!(\"alpha\");\n");
     successful(fixture.build(false));
     rejected(
         fixture.run(false, &home, &[]),
         &["duplicate skill namespace \"alpha\": \
-           skill_fixture_notes (notes/src/lib.rs:1) and \
+           skill_fixture_foo (foo/src/lib.rs:1) and \
            skill_fixture_plugin (plugin/src/lib.rs:1)"],
     );
 }

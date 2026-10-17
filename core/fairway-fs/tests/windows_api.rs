@@ -62,8 +62,8 @@ async fn non_unicode_case_aliases_share_a_lock() -> anyhow::Result<()> {
 #[tokio::test]
 async fn distinct_names_can_share_a_queue_without_changing_the_target() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
-    let first = dir.path().join("straße");
-    let second = dir.path().join("STRASSE");
+    let first = dir.path().join("alphaß");
+    let second = dir.path().join("ALPHASS");
     std::fs::write(&first, "first")?;
     std::fs::write(&second, "second")?;
     assert_eq!(
@@ -125,7 +125,7 @@ async fn reservation_is_hidden_and_published_files_keep_their_attributes() -> an
 async fn short_file_aliases_share_a_lock_and_preserve_the_long_name() -> anyhow::Result<()> {
     use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
     let dir = tempfile::tempdir()?;
-    let path = dir.path().join("long-document-filename.txt");
+    let path = dir.path().join("lorem-ipsum-dolor.txt");
     std::fs::write(&path, "old")?;
     let input: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
     let mut buffer = vec![0_u16; 32768];
@@ -172,7 +172,7 @@ async fn edit_text_and_path_apis() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     // A name with Cyrillic letters and spaces, and text with a CRLF line
     // ending, which must reach the handler unchanged.
-    let path = dir.path().join("данные с пробелами");
+    let path = dir.path().join("лорем ипсум долор");
     fs::write(&path, "head猫\r\ntail".to_owned()).await?;
     fs::edit(&path, |text: String| async move {
         assert_eq!(text, "head猫\r\ntail");
@@ -193,10 +193,10 @@ async fn long_paths_and_multiple_binary_streams_survive_edit() -> anyhow::Result
     let dir = tempfile::tempdir()?;
     let mut parent = dir.path().to_path_buf();
     for _ in 0..12 {
-        parent.push("длинная папка с пробелами");
+        parent.push("лорем ипсум долор сит амет");
     }
     fs::mkdir(&parent).await?;
-    let path = parent.join("document.txt");
+    let path = parent.join("foo.txt");
     // Longer than MAX_PATH, the limit of the classic Win32 path functions.
     assert!(path.as_os_str().encode_wide().count() > 260);
     fs::write(&path, "old".to_owned()).await?;
@@ -204,9 +204,9 @@ async fn long_paths_and_multiple_binary_streams_survive_edit() -> anyhow::Result
     for (name, value) in [
         ("binary", large.as_slice()),
         ("empty", b"".as_slice()),
-        ("text", b"metadata".as_slice()),
+        ("text", b"Lorem ipsum dolor sit amet.".as_slice()),
     ] {
-        std::fs::write(path.with_file_name(format!("document.txt:{name}")), value)?;
+        std::fs::write(path.with_file_name(format!("foo.txt:{name}")), value)?;
     }
     fs::edit(
         &path,
@@ -214,14 +214,11 @@ async fn long_paths_and_multiple_binary_streams_survive_edit() -> anyhow::Result
     )
     .await?;
     assert_eq!(fs::read::<String>(&path).await?, "old!");
+    assert_eq!(std::fs::read(path.with_file_name("foo.txt:binary"))?, large);
+    assert!(std::fs::read(path.with_file_name("foo.txt:empty"))?.is_empty());
     assert_eq!(
-        std::fs::read(path.with_file_name("document.txt:binary"))?,
-        large
-    );
-    assert!(std::fs::read(path.with_file_name("document.txt:empty"))?.is_empty());
-    assert_eq!(
-        std::fs::read(path.with_file_name("document.txt:text"))?,
-        b"metadata"
+        std::fs::read(path.with_file_name("foo.txt:text"))?,
+        b"Lorem ipsum dolor sit amet."
     );
     Ok(())
 }

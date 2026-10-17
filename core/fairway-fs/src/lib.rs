@@ -25,22 +25,22 @@
 //! use serde::{Deserialize, Serialize};
 //!
 //! #[derive(Deserialize, Serialize)]
-//! struct Stats {
-//!     runs: u32,
+//! struct Example {
+//!     count: u32,
 //! }
 //!
 //! let directory = fairway_fs::temp_dir().await?;
-//! let path = directory.path().join("stats.json");
+//! let path = directory.path().join("example.json");
 //!
-//! fairway_fs::write(&path, Json(Stats { runs: 0 })).await?;
-//! fairway_fs::edit(&path, |Json(mut stats): Json<Stats>| async move {
-//!     stats.runs += 1;
-//!     Ok::<_, fairway_fs::Error>(Json(stats))
+//! fairway_fs::write(&path, Json(Example { count: 0 })).await?;
+//! fairway_fs::edit(&path, |Json(mut example): Json<Example>| async move {
+//!     example.count += 1;
+//!     Ok::<_, fairway_fs::Error>(Json(example))
 //! })
 //! .await?;
 //!
-//! let Json(stats): Json<Stats> = fairway_fs::read(&path).await?;
-//! assert_eq!(stats.runs, 1);
+//! let Json(example): Json<Example> = fairway_fs::read(&path).await?;
+//! assert_eq!(example.count, 1);
 //! # Ok(())
 //! # }
 //! ```
@@ -81,7 +81,7 @@
 //! # Locking
 //!
 //! [`write`] and [`edit`] reserve the target by exclusively creating an
-//! adjacent file: `report.txt` uses `.report.txt.lock`. The reservation is
+//! adjacent file: `example.txt` uses `.example.txt.lock`. The reservation is
 //! taken before reading or encoding, and the replacement contents are written
 //! to this same file. Renaming it over the target publishes the result and
 //! releases the reservation. Processes coordinate independently of
@@ -239,11 +239,11 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// use fairway_codec::Json;
 ///
 /// let directory = fairway_fs::temp_dir().await?;
-/// let path = directory.path().join("tags.json");
-/// fairway_fs::write(&path, r#"["draft", "notes"]"#.to_owned()).await?;
+/// let path = directory.path().join("example.json");
+/// fairway_fs::write(&path, r#"["alpha", "beta"]"#.to_owned()).await?;
 ///
-/// let Json(tags): Json<Vec<String>> = fairway_fs::read(&path).await?;
-/// assert_eq!(tags, ["draft", "notes"]);
+/// let Json(values): Json<Vec<String>> = fairway_fs::read(&path).await?;
+/// assert_eq!(values, ["alpha", "beta"]);
 /// # Ok(())
 /// # }
 /// ```
@@ -348,10 +348,10 @@ where
 /// use fairway_codec::{Toml, toml};
 ///
 /// let directory = fairway_fs::temp_dir().await?;
-/// let path = directory.path().join("settings.toml");
+/// let path = directory.path().join("example.toml");
 ///
-/// fairway_fs::write(&path, Toml(toml! { retries = 3 })).await?;
-/// assert_eq!(fairway_fs::read::<String>(&path).await?, "retries = 3\n");
+/// fairway_fs::write(&path, Toml(toml! { foo = 3 })).await?;
+/// assert_eq!(fairway_fs::read::<String>(&path).await?, "foo = 3\n");
 /// # Ok(())
 /// # }
 /// ```
@@ -443,18 +443,18 @@ where
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), fairway_fs::Error> {
 /// let directory = fairway_fs::temp_dir().await?;
-/// let path = directory.path().join("todo.txt");
-/// fairway_fs::write(&path, "- write docs\n".to_owned()).await?;
+/// let path = directory.path().join("example.txt");
+/// fairway_fs::write(&path, "Lorem ipsum dolor sit amet.\n".to_owned()).await?;
 ///
-/// let item = "- run tests\n";
+/// let line = "Consectetur adipiscing elit.\n";
 /// fairway_fs::edit(&path, |mut text: String| async move {
-///     text.push_str(item);
+///     text.push_str(line);
 ///     Ok::<_, fairway_fs::Error>(text)
 /// })
 /// .await?;
 ///
 /// let text: String = fairway_fs::read(&path).await?;
-/// assert_eq!(text, "- write docs\n- run tests\n");
+/// assert_eq!(text, "Lorem ipsum dolor sit amet.\nConsectetur adipiscing elit.\n");
 /// # Ok(())
 /// # }
 /// ```

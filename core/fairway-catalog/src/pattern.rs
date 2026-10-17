@@ -60,7 +60,7 @@ mod tests {
             ("", "", true),
             ("", "a", false),
             ("alpha-items/*", "other/alpha-items/lorem", false),
-            ("*задача*", "моя/задача/✓", true),
+            ("*рыба*", "лорем/рыба/✓", true),
             ("*🙂*🙂", "🙂", false),
             ("*🙂*🙂", "🙂/🙂", true),
             ("?[]\\", "?[]\\", true),

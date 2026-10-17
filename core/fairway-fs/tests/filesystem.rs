@@ -193,7 +193,7 @@ async fn an_existing_reservation_is_preserved_and_skips_encoding() -> anyhow::Re
     let path = directory.path().join("data");
     let reservation = directory.path().join(".data.lock");
     std::fs::write(&path, "old")?;
-    std::fs::write(&reservation, "another operation")?;
+    std::fs::write(&reservation, "Lorem ipsum dolor sit amet.")?;
     assert_eq!(
         fs::write(&path, Invalid).await.unwrap_err().kind(),
         io::ErrorKind::WouldBlock
@@ -210,7 +210,7 @@ async fn an_existing_reservation_is_preserved_and_skips_encoding() -> anyhow::Re
         .await
         .is_err()
     );
-    assert_eq!(std::fs::read(&reservation)?, b"another operation");
+    assert_eq!(std::fs::read(&reservation)?, b"Lorem ipsum dolor sit amet.");
     assert_eq!(std::fs::read(&path)?, b"old");
     std::fs::remove_file(reservation)?;
     // A cancelled blocking attempt can still be leaving the local queue.
@@ -624,7 +624,7 @@ async fn directories_metadata_and_temporary_resources() -> anyhow::Result<()> {
     let file = fs::temp_file().await?;
     // `write` puts a new file at the path; `close` removes it anyway, because
     // a `TempFile` owns the path rather than a particular file.
-    fs::write(&file, "replaced temporary inode".to_owned()).await?;
+    fs::write(&file, "Lorem ipsum dolor sit amet.".to_owned()).await?;
     let file_path = file.path().to_owned();
     file.close().await?;
     assert!(!fs::exists(file_path).await?);
@@ -809,7 +809,7 @@ mod unix {
     async fn new_file_permissions_follow_the_normal_umask() -> anyhow::Result<()> {
         let directory = tempfile::tempdir()?;
         let normal = directory.path().join("normal");
-        let fairway = directory.path().join("fairway");
+        let fairway = directory.path().join("example");
         std::fs::write(&normal, "")?;
         fs::write(&fairway, "".to_owned()).await?;
         assert_eq!(
@@ -824,8 +824,8 @@ mod unix {
     async fn macos_case_and_unicode_aliases_share_locks_even_before_creation() -> anyhow::Result<()>
     {
         let directory = tempfile::tempdir()?;
-        let path = directory.path().join("Café");
-        let alias = directory.path().join("CAFE\u{301}");
+        let path = directory.path().join("Fooé");
+        let alias = directory.path().join("FOOE\u{301}");
         let (started, wait_started) = oneshot::channel();
         let (release, wait_release) = std::sync::mpsc::channel();
         let first = tokio::spawn(fs::write(

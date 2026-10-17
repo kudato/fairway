@@ -53,7 +53,7 @@ fn an_empty_namespace() {
         "lorem",
         "sed/tempor",
         "Lorem/ipsum",
-        "путь/задача ✓",
+        "лорем/рыба ✓",
         // Parts are literal: no path resolution and no escaping.
         "../escape.rs",
         "literal/\"quote\"\\path\n\0/✓",
@@ -67,7 +67,7 @@ fn an_empty_namespace() {
     );
     assert_eq!(STATE.list("*/ipsum"), ["Lorem/ipsum", "lorem/ipsum"]);
     assert_eq!(STATE.list("lorem"), ["lorem"]);
-    assert_eq!(STATE.list("*задача*"), ["путь/задача ✓"]);
+    assert_eq!(STATE.list("*рыба*"), ["лорем/рыба ✓"]);
     assert!(STATE.list("missing/*").is_empty());
     assert_eq!(STATE.list("*").len(), 8);
 

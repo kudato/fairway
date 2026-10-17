@@ -55,7 +55,7 @@ mod tests {
         for (name, expected) in [
             ("alpha", Ok(())),
             ("lorem-ipsum_2", Ok(())),
-            ("задачи", Ok(())),
+            ("рыба", Ok(())),
             ("..", Ok(())),
             ("", Err("a catalog namespace name cannot be empty")),
             (

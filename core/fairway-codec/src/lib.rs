@@ -43,9 +43,9 @@
 //! ```
 //! use fairway_codec::{Decode, Encode, Json};
 //!
-//! let Json(mut words): Json<Vec<String>> = Json::decode(br#"["cat", "dog"]"#.to_vec())?;
-//! words.push("fox".to_owned());
-//! assert_eq!(Json(words).encode()?, b"[\"cat\",\"dog\",\"fox\"]\n");
+//! let Json(mut words): Json<Vec<String>> = Json::decode(br#"["alpha", "beta"]"#.to_vec())?;
+//! words.push("gamma".to_owned());
+//! assert_eq!(Json(words).encode()?, b"[\"alpha\",\"beta\",\"gamma\"]\n");
 //! # Ok::<(), fairway_codec::Error>(())
 //! ```
 //!

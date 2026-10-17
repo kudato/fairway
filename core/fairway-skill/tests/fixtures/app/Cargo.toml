@@ -7,5 +7,5 @@ publish = false
 [dependencies]
 skill.workspace = true
 skill-fixture-plugin = { path = "../plugin" }
-skill-fixture-notes = { path = "../notes" }
+skill-fixture-foo = { path = "../foo" }
 tokio = { version = "1", features = ["rt"] }

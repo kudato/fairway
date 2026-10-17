@@ -66,7 +66,7 @@ fn cli_guides() {
         for module in ["main.rs", "app.rs", "signal.rs"] {
             fs::copy(fairway.join("src").join(module), src.join(module)).unwrap();
         }
-        fs::write(src.join("plugins.rs"), "use fairway_cli_docs as _;\n").unwrap();
+        fs::write(src.join("plugins.rs"), "use foo_bar as _;\n").unwrap();
         fs::write(
             directory.path().join("Cargo.toml"),
             format!(
@@ -74,10 +74,10 @@ fn cli_guides() {
 [workspace]
 
 [package]
-name = "fairway-cli-docs"
+name = "foo-bar"
 version = "{version}"
 edition = "2024"
-description = "CLI documentation examples"
+description = "Lorem ipsum dolor sit amet."
 
 # Help output shows the binary name, as it does for the real application.
 [[bin]]

@@ -107,7 +107,7 @@ impl Operation {
 /// such as a path that does not name a regular file, has no source.
 ///
 /// The message names the step and the path, for example
-/// `cannot open /data/notes.txt`, and adds an explanation if there is no
+/// `cannot open /lorem/ipsum.txt`, and adds an explanation if there is no
 /// source. It does not repeat the source, so print the whole chain of
 /// sources to show the cause, as the alternate format `{:#}` of
 /// `anyhow::Error` does.

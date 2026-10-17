@@ -13,12 +13,12 @@
 //! stored as they are: encoding, if any, is up to the owner.
 //!
 //! ```
-//! fairway_catalog::namespace!(NOTES: String, "doc-notes");
+//! fairway_catalog::namespace!(ALPHA: String, "example-alpha");
 //!
 //! fairway_catalog::initialize()?;
-//! NOTES.put("todo/first", "write tests".to_owned())?;
-//! assert_eq!(NOTES.get("todo/first").as_deref(), Some("write tests"));
-//! assert_eq!(NOTES.list("todo/*"), ["todo/first"]);
+//! ALPHA.put("lorem/ipsum", "Lorem ipsum dolor sit amet.".to_owned())?;
+//! assert_eq!(ALPHA.get("lorem/ipsum").as_deref(), Some("Lorem ipsum dolor sit amet."));
+//! assert_eq!(ALPHA.list("lorem/*"), ["lorem/ipsum"]);
 //! # Ok::<(), fairway_catalog::Error>(())
 //! ```
 
@@ -87,9 +87,9 @@ pub fn initialize() -> Result<(), Error> {
 ///     vec![("lorem/one".to_owned(), 1)]
 /// }
 ///
-/// fairway_catalog::namespace!(STATE: String, "doc-state");
-/// fairway_catalog::namespace!(ITEMS: Cow<'static, [u8]>, "doc-items", builtin);
-/// fairway_catalog::namespace!(DEFAULTS: u16, "doc-defaults", initial = defaults);
+/// fairway_catalog::namespace!(STATE: String, "example-state");
+/// fairway_catalog::namespace!(ITEMS: Cow<'static, [u8]>, "example-items", builtin);
+/// fairway_catalog::namespace!(DEFAULTS: u16, "example-defaults", initial = defaults);
 /// ```
 #[macro_export]
 macro_rules! namespace {

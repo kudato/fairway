@@ -159,11 +159,11 @@ async fn scenario(mode: &str, home: &Path) {
             ALPHA.set(&["value"], 40).await.unwrap();
             BETA.set(&["value"], 50).await.unwrap();
             GAMMA
-                .set(&["entries", "lorem/ipsum.md"], "original")
+                .set(&["entries", "lorem/ipsum.dolor"], "original")
                 .await
                 .unwrap();
             GAMMA
-                .set(&["entries", "lorem/ipsum.md"], "updated")
+                .set(&["entries", "lorem/ipsum.dolor"], "updated")
                 .await
                 .unwrap();
             let mut tasks = Vec::new();
@@ -191,7 +191,7 @@ async fn scenario(mode: &str, home: &Path) {
             let entries = automatic["gamma"]["entries"].as_table().unwrap();
             assert_eq!(entries.len(), 9);
             assert!(!entries.contains_key("inherited"));
-            assert_eq!(entries["lorem/ipsum.md"].as_str(), Some("updated"));
+            assert_eq!(entries["lorem/ipsum.dolor"].as_str(), Some("updated"));
             for index in 0..8 {
                 assert_eq!(
                     entries[&format!("dolor/{index}")].as_str(),
@@ -224,7 +224,7 @@ async fn scenario(mode: &str, home: &Path) {
             let entries = &GAMMA.get()["entries"];
             assert_eq!(entries.len(), 10);
             assert_eq!(entries["inherited"], "changed");
-            assert_eq!(entries["lorem/ipsum.md"], "updated");
+            assert_eq!(entries["lorem/ipsum.dolor"], "updated");
         }
         "invalid" => {
             config(home, "20");
@@ -317,7 +317,7 @@ fn process_configuration() {
     for modes in scenarios {
         let home = tempfile::tempdir().unwrap();
         let config_home = if matches!(modes[0], "defaults" | "uninitialized") {
-            home.path().join("nested/fairway")
+            home.path().join("nested/example")
         } else {
             home.path().to_owned()
         };

@@ -65,25 +65,7 @@
 //!
 //! The build script calls `build` once with every file of every namespace of
 //! the crate; it checks and compresses them. The crate declares each of its
-//! namespaces with [`namespace!`] and includes the files with [`embed!`]:
-//!
-//! ```rust,ignore
-//! // build.rs
-//! use fairway_skill::Entry;
-//!
-//! fn main() -> Result<(), fairway_skill::BuildError> {
-//!     fairway_skill::build([
-//!         Entry::new("skill/writing/technical", "skills/technical.md"),
-//!         Entry::new("reference/writing/ste", "skills/references/ste.md"),
-//!         Entry::new("skill/editing/proofread", "skills/proofread.md"),
-//!     ])
-//! }
-//!
-//! // src/lib.rs
-//! fairway_skill::namespace!("writing");
-//! fairway_skill::namespace!("editing");
-//! fairway_skill::embed!();
-//! ```
+//! namespaces with [`namespace!`] and includes the files with [`embed!`].
 //!
 //! A namespace belongs to the crate that declares it, which is checked by
 //! [`validate_registry`]. A crate may declare a namespace without builtins.
