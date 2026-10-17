@@ -3,18 +3,18 @@
 //! ```
 //! use fairway_cli::Shutdown;
 //!
-//! fairway_cli::namespace!(CLI, "hello");
+//! fairway_cli::namespace!(CLI, "alpha");
 //!
-//! async fn hello(shutdown: Shutdown) -> anyhow::Result<()> {
+//! async fn alpha(shutdown: Shutdown) -> anyhow::Result<()> {
 //!     if shutdown.is_requested() {
 //!         return Ok(());
 //!     }
-//!     println!("Hello, world!");
+//!     println!("Lorem ipsum.");
 //!     Ok(())
 //! }
 //!
-//! fairway_cli::command!(CLI, "Print a greeting", hello,
-//!     long_about = "Write Hello, world! to standard output.");
+//! fairway_cli::command!(CLI, "Lorem ipsum", alpha,
+//!     long_about = "Lorem ipsum dolor sit amet.");
 //! ```
 //!
 //! A handler takes a [`Shutdown`], optionally preceded by arguments

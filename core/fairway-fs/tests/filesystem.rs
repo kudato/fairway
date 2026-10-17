@@ -787,9 +787,9 @@ mod unix {
         std::fs::hard_link(&path, &link)?;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640))?;
         #[cfg(target_os = "macos")]
-        let attribute = "com.fairway.test";
+        let attribute = "com.example.test";
         #[cfg(not(target_os = "macos"))]
-        let attribute = "user.fairway-test";
+        let attribute = "user.example-test";
         xattr::set(&path, attribute, b"value")?;
         let before = std::fs::metadata(&path)?;
         fs::write(&path, "new".to_owned()).await?;

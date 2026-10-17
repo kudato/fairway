@@ -144,16 +144,16 @@ mod tests {
     fn addresses_are_split_or_rejected_with_a_reason() {
         for (address, kind, namespace, entry) in [
             (
-                "skill/writing/technical",
+                "skill/alpha/example-skill",
                 Kind::Skill,
-                "writing",
-                "writing/technical",
+                "alpha",
+                "alpha/example-skill",
             ),
             (
-                "reference/письмо/ste.v2_final-1",
+                "reference/рыба/lorem.v2_final-1",
                 Kind::Reference,
-                "письмо",
-                "письмо/ste.v2_final-1",
+                "рыба",
+                "рыба/lorem.v2_final-1",
             ),
             // Parts are literal, so dots are not path components.
             ("skill/../..", Kind::Skill, "..", "../.."),
@@ -168,37 +168,37 @@ mod tests {
         for (address, reason) in [
             ("", three),
             ("skill", three),
-            ("skill/writing", three),
-            ("skill/writing/technical/extra", three),
-            ("skill/writing/technical/", three),
+            ("skill/alpha", three),
+            ("skill/alpha/example-skill/extra", three),
+            ("skill/alpha/example-skill/", three),
             (
-                "skills/writing/technical",
+                "skills/alpha/example-skill",
                 "must start with `skill/` or `reference/`",
             ),
             (
-                "/writing/technical",
+                "/alpha/example-skill",
                 "must start with `skill/` or `reference/`",
             ),
-            ("skill//technical", "has an empty part"),
-            ("skill/writing/", "has an empty part"),
+            ("skill//example-skill", "has an empty part"),
+            ("skill/alpha/", "has an empty part"),
             (
-                "skill/writing/two words",
+                "skill/alpha/two words",
                 "contains whitespace or a control character",
             ),
             (
-                "skill/writing/two\u{3000}words",
+                "skill/alpha/two\u{3000}words",
                 "contains whitespace or a control character",
             ),
             (
-                "skill/writ\u{85}ing/x",
+                "skill/al\u{85}pha/x",
                 "contains whitespace or a control character",
             ),
             (
-                "skill/writing/tab\t",
+                "skill/alpha/tab\t",
                 "contains whitespace or a control character",
             ),
-            ("skill/writing/*", "contains `*`"),
-            ("reference/wr*ting/x", "contains `*`"),
+            ("skill/alpha/*", "contains `*`"),
+            ("reference/al*ha/x", "contains `*`"),
         ] {
             assert_eq!(parse(address), Err(reason), "address {address:?}");
         }
@@ -207,8 +207,8 @@ mod tests {
     #[test]
     fn a_namespace_name_is_one_part() {
         for (name, expected) in [
-            ("writing", Ok(())),
-            ("письмо.猫.🌍", Ok(())),
+            ("alpha", Ok(())),
+            ("рыба.猫.🌍", Ok(())),
             ("", Err("a skill namespace cannot be empty")),
             (
                 "two words",

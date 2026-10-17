@@ -8,14 +8,14 @@ use tokio_util::sync::CancellationToken;
 use fairway_cli::__private::{PreparedCommand, assert_valid};
 use fairway_cli::{Shutdown, help as namespace_help};
 
-fairway_cli::namespace!(CLI, "text");
+fairway_cli::namespace!(CLI, "gamma");
 fairway_cli::command!(
     CLI,
-    "Text commands",
+    "Lorem ipsum",
     namespace_help,
-    long_about = "Commands for processing text.\n\nChoose a command from the list below."
+    long_about = "Dolor sit amet.\n\nConsectetur adipiscing elit."
 );
-fairway_cli::namespace!(HELLO, "hello");
+fairway_cli::namespace!(BETA, "beta");
 
 static OUTPUT: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
@@ -27,15 +27,15 @@ fn recorded(value: &str) -> bool {
     OUTPUT.lock().unwrap().iter().any(|item| item == value)
 }
 
-async fn hello(_: Shutdown) -> anyhow::Result<()> {
-    note("hello");
+async fn beta(_: Shutdown) -> anyhow::Result<()> {
+    note("beta");
     Ok(())
 }
 fairway_cli::command!(
-    HELLO,
-    "Greeting",
-    hello,
-    long_about = "Print a greeting.\n\nThe greeting is written to standard output."
+    BETA,
+    "Sed do eiusmod",
+    beta,
+    long_about = "Tempor incididunt.\n\nUt labore et dolore magna."
 );
 
 /// Argument type description that must not become the command description.
@@ -47,36 +47,35 @@ fairway_cli::command!(
     long_about = "Ignored argument long_about",
     after_help = "Extra argument help"
 )]
-struct Repeat {
-    /// Text to repeat.
-    text: String,
-    /// Number of repetitions.
+struct Words {
+    /// Aliquip ex ea.
+    word: String,
+    /// Commodo consequat.
     #[arg(long, default_value_t = 2)]
-    times: usize,
+    count: usize,
 }
 
-async fn repeat(args: Repeat, _: Shutdown) -> anyhow::Result<()> {
-    note(args.text.repeat(args.times));
+async fn foo(args: Words, _: Shutdown) -> anyhow::Result<()> {
+    note(args.word.repeat(args.count));
     Ok(())
 }
 fairway_cli::command!(
     CLI,
-    "repeat",
-    "Repeat text",
-    repeat,
-    long_about =
-        "Repeat text the requested number of times.\n\nExample: fairway text repeat hi --times 3"
+    "foo",
+    "Aliqua enim",
+    foo,
+    long_about = "Minim veniam quis.\n\nExample: fairway gamma foo lorem --count 3"
 );
 
-fairway_cli::namespace!(ECHO, "echo");
+fairway_cli::namespace!(ALPHA, "alpha");
 fairway_cli::command!(
-    ECHO,
-    "Echo text",
-    repeat,
-    long_about = "Print the supplied text repeatedly.\n\nExample: fairway echo hi --times 3"
+    ALPHA,
+    "Nostrud exercitation",
+    foo,
+    long_about = "Ullamco laboris nisi.\n\nExample: fairway alpha lorem --count 3"
 );
 
-async fn observe(shutdown: Shutdown) -> anyhow::Result<()> {
+async fn baz(shutdown: Shutdown) -> anyhow::Result<()> {
     assert!(shutdown.is_requested());
     shutdown.requested().await;
     note("observed");
@@ -84,37 +83,37 @@ async fn observe(shutdown: Shutdown) -> anyhow::Result<()> {
 }
 fairway_cli::command!(
     CLI,
-    "observe",
+    "baz",
     "Observe shutdown",
-    observe,
+    baz,
     long_about = "Observe shutdown"
 );
 
-async fn both(args: Repeat, shutdown: Shutdown) -> anyhow::Result<()> {
+async fn bar(args: Words, shutdown: Shutdown) -> anyhow::Result<()> {
     assert!(shutdown.is_requested());
-    note(args.text.repeat(args.times));
+    note(args.word.repeat(args.count));
     Ok(())
 }
 fairway_cli::command!(
     CLI,
-    "both",
+    "bar",
     "Arguments and shutdown",
-    both,
+    bar,
     long_about = "Arguments and shutdown"
 );
 
 mod sibling {
     use super::CLI as ALIAS;
 
-    async fn upper(_: fairway_cli::Shutdown) -> anyhow::Result<()> {
+    async fn qux(_: fairway_cli::Shutdown) -> anyhow::Result<()> {
         super::note("sibling");
         Ok(())
     }
     fairway_cli::command!(
         ALIAS,
-        "upper",
+        "qux",
         "Registered from another module",
-        upper,
+        qux,
         long_about = "Registered from another module"
     );
 }
@@ -134,20 +133,20 @@ async fn run(args: &[&str]) -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn commands_receive_positionals_options_and_defaults() {
-    run(&["fairway", "hello"]).await.unwrap();
-    assert!(recorded("hello"));
-    run(&["fairway", "text", "repeat", "hi"]).await.unwrap();
-    assert!(recorded("hihi"));
-    run(&["fairway", "text", "repeat", "a", "--times", "3"])
+    run(&["fairway", "beta"]).await.unwrap();
+    assert!(recorded("beta"));
+    run(&["fairway", "gamma", "foo", "lorem"]).await.unwrap();
+    assert!(recorded("loremlorem"));
+    run(&["fairway", "gamma", "foo", "a", "--count", "3"])
         .await
         .unwrap();
     assert!(recorded("aaa"));
-    run(&["fairway", "text", "upper"]).await.unwrap();
+    run(&["fairway", "gamma", "qux"]).await.unwrap();
     assert!(recorded("sibling"));
-    run(&["fairway", "echo", "echo", "--times", "1"])
+    run(&["fairway", "alpha", "alpha", "--count", "1"])
         .await
         .unwrap();
-    assert!(recorded("echo"));
+    assert!(recorded("alpha"));
 }
 
 #[tokio::test]
@@ -159,8 +158,8 @@ async fn both_shutdown_signatures_receive_the_shared_request() {
     observer.requested().await;
 
     for args in [
-        vec!["fairway", "text", "observe"],
-        vec!["fairway", "text", "both", "shutdown", "--times", "1"],
+        vec!["fairway", "gamma", "baz"],
+        vec!["fairway", "gamma", "bar", "shutdown", "--count", "1"],
     ] {
         parse(&args).unwrap().run(observer.clone()).await.unwrap();
     }
@@ -176,16 +175,16 @@ fn help_uses_declarations_and_field_comments() {
         .expect("expected help")
         .to_string();
     assert!(root.contains("CLI tests"), "{root}");
-    assert!(root.contains("Text commands"), "{root}");
-    assert!(root.contains("Greeting"), "{root}");
+    assert!(root.contains("Lorem ipsum"), "{root}");
+    assert!(root.contains("Sed do eiusmod"), "{root}");
     // Commands are listed by name, whatever the declaration order or module.
-    let text = parse(&["fairway", "text", "--help"])
+    let gamma = parse(&["fairway", "gamma", "--help"])
         .err()
         .expect("expected help")
         .to_string();
     for (help, names) in [
-        (&root, &["echo", "hello", "text"][..]),
-        (&text, &["both", "observe", "repeat", "upper"][..]),
+        (&root, &["alpha", "beta", "gamma"][..]),
+        (&gamma, &["bar", "baz", "foo", "qux"][..]),
     ] {
         let positions: Vec<_> = names
             .iter()
@@ -195,72 +194,68 @@ fn help_uses_declarations_and_field_comments() {
     }
     for (args, description, example) in [
         (
-            vec!["fairway", "text", "repeat", "--help"],
-            "Repeat text the requested number of times.",
-            "Example: fairway text repeat hi --times 3",
+            vec!["fairway", "gamma", "foo", "--help"],
+            "Minim veniam quis.",
+            "Example: fairway gamma foo lorem --count 3",
         ),
         (
-            vec!["fairway", "echo", "--help"],
-            "Print the supplied text repeatedly.",
-            "Example: fairway echo hi --times 3",
+            vec!["fairway", "alpha", "--help"],
+            "Ullamco laboris nisi.",
+            "Example: fairway alpha lorem --count 3",
         ),
     ] {
         let help = parse(&args).err().expect("expected help").to_string();
         assert!(help.starts_with(description), "{help}");
         assert!(help.contains(example), "{help}");
-        assert!(help.contains("Number of repetitions"), "{help}");
-        assert!(help.contains("--times"), "{help}");
+        assert!(help.contains("Commodo consequat"), "{help}");
+        assert!(help.contains("--count"), "{help}");
         assert!(help.contains("--help"), "{help}");
         assert!(help.contains("Extra argument help"), "{help}");
         assert!(!help.contains("Ignored argument"), "{help}");
         assert!(!help.contains("Argument type"), "{help}");
     }
-    let hello = parse(&["fairway", "hello", "--help"])
+    let beta = parse(&["fairway", "beta", "--help"])
         .err()
         .expect("expected help")
         .to_string();
     assert!(
-        hello.contains("Print a greeting.\n\nThe greeting is written to standard output."),
-        "{hello}"
+        beta.contains("Tempor incididunt.\n\nUt labore et dolore magna."),
+        "{beta}"
     );
 }
 
 #[test]
 fn namespace_action_shows_full_help_and_short_help_uses_about() {
-    let default = parse(&["fairway", "text"]).err().expect("expected help");
-    let explicit = parse(&["fairway", "text", "--help"])
+    let default = parse(&["fairway", "gamma"]).err().expect("expected help");
+    let explicit = parse(&["fairway", "gamma", "--help"])
         .err()
         .expect("expected help");
     assert_eq!(default.kind(), clap::error::ErrorKind::DisplayHelp);
     assert_eq!(default.exit_code(), 0);
     assert!(!default.use_stderr());
     assert_eq!(default.to_string(), explicit.to_string());
-    assert!(
-        default
-            .to_string()
-            .contains("Commands for processing text.")
-    );
-    assert!(default.to_string().contains("Usage: fairway text"));
+    assert!(default.to_string().contains("Dolor sit amet."));
+    assert!(default.to_string().contains("Usage: fairway gamma"));
     for (args, short, long) in [
         (
-            vec!["fairway", "text", "-h"],
-            "Text commands",
-            "Commands for processing text.",
+            vec!["fairway", "gamma", "-h"],
+            "Lorem ipsum",
+            "Dolor sit amet.",
         ),
         (
-            vec!["fairway", "hello", "-h"],
-            "Greeting",
-            "Print a greeting.",
+            vec!["fairway", "beta", "-h"],
+            "Sed do eiusmod",
+            "Tempor incididunt.",
         ),
         (
-            vec!["fairway", "text", "repeat", "-h"],
-            "Repeat text",
-            "Repeat text the requested number of times.",
+            vec!["fairway", "gamma", "foo", "-h"],
+            "Aliqua enim",
+            "Minim veniam quis.",
         ),
         (
-            vec!["fairway", "echo", "-h"],
-            "Echo text",
-            "Print the supplied text repeatedly.",
+            vec!["fairway", "alpha", "-h"],
+            "Nostrud exercitation",
+            "Ullamco laboris nisi.",
         ),
     ] {
         let help = parse(&args).err().expect("expected help").to_string();
@@ -274,14 +269,14 @@ fn help_version_and_invalid_arguments_are_returned_to_the_application() {
     for (args, code) in [
         (vec!["fairway", "--help"], 0),
         (vec!["fairway", "--version"], 0),
-        (vec!["fairway", "text", "--help"], 0),
-        (vec!["fairway", "text", "repeat", "--help"], 0),
+        (vec!["fairway", "gamma", "--help"], 0),
+        (vec!["fairway", "gamma", "foo", "--help"], 0),
         (vec!["fairway"], 2),
-        (vec!["fairway", "text"], 0),
-        (vec!["fairway", "text", "unknown"], 2),
-        (vec!["fairway", "text", "repeat"], 2),
-        (vec!["fairway", "text", "repeat", "x", "--times", "bad"], 2),
-        (vec!["fairway", "hello", "--unknown"], 2),
+        (vec!["fairway", "gamma"], 0),
+        (vec!["fairway", "gamma", "unknown"], 2),
+        (vec!["fairway", "gamma", "foo"], 2),
+        (vec!["fairway", "gamma", "foo", "x", "--count", "bad"], 2),
+        (vec!["fairway", "beta", "--unknown"], 2),
     ] {
         let error = parse(&args).err().expect("expected a clap diagnostic");
         assert_eq!(error.exit_code(), code);

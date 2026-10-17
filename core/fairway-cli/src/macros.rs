@@ -9,7 +9,7 @@
 /// The name `help` is reserved for built-in help and is a compile error.
 ///
 /// ```
-/// fairway_cli::namespace!(CLI, "text");
+/// fairway_cli::namespace!(CLI, "alpha");
 /// ```
 #[macro_export]
 macro_rules! namespace {
@@ -63,33 +63,33 @@ macro_rules! namespace {
 ///
 /// `workers = N` requests N Tokio worker threads from Fairway; zero uses
 /// the available parallelism. Without `workers`, Fairway runs the command
-/// on one execution thread. A selector such as `workers = |args: &Serve|
+/// on one execution thread. A selector such as `workers = |args: &Foo|
 /// args.workers` reads the parsed arguments before Fairway creates the runtime.
 /// The built-in `help` action does not accept `workers`.
 ///
 /// ```
 /// use fairway_cli::Shutdown;
 ///
-/// fairway_cli::namespace!(CLI, "text");
-/// fairway_cli::command!(CLI, "Text commands", fairway_cli::help,
-///     long_about = "Commands for working with text.");
+/// fairway_cli::namespace!(CLI, "alpha");
+/// fairway_cli::command!(CLI, "Lorem ipsum", fairway_cli::help,
+///     long_about = "Lorem ipsum dolor sit amet.");
 ///
 /// #[derive(clap::Args)]
-/// struct Upper {
-///     /// Text to convert to uppercase.
-///     text: String,
+/// struct Foo {
+///     /// Consectetur adipiscing elit.
+///     word: String,
 /// }
 ///
-/// async fn upper(args: Upper, shutdown: Shutdown) -> anyhow::Result<()> {
+/// async fn foo(args: Foo, shutdown: Shutdown) -> anyhow::Result<()> {
 ///     if shutdown.is_requested() {
 ///         return Ok(());
 ///     }
-///     println!("{}", args.text.to_uppercase());
+///     println!("{}", args.word);
 ///     Ok(())
 /// }
 ///
-/// fairway_cli::command!(CLI, "upper", "Convert text to uppercase", upper,
-///     long_about = "Convert the supplied text to uppercase and print the result.");
+/// fairway_cli::command!(CLI, "foo", "Sed do eiusmod", foo,
+///     long_about = "Sed do eiusmod tempor incididunt.");
 /// ```
 #[macro_export]
 macro_rules! command {

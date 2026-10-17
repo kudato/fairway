@@ -206,15 +206,15 @@ value = 2
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(crate = "fairway_codec::serde", default, deny_unknown_fields)]
 struct Settings {
-    listen: String,
-    ttl: u64,
+    name: String,
+    count: u64,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            listen: "localhost".into(),
-            ttl: 300,
+            name: "lorem".into(),
+            count: 7,
         }
     }
 }
@@ -400,12 +400,8 @@ async fn every_registered_section_must_be_a_table() {
 #[tokio::test]
 async fn errors_retain_sources_and_name_every_contributing_file() {
     let home = TempDir::new().unwrap();
-    write(
-        home.path(),
-        "config.toml",
-        "[settings]\nlisten = 'server'\n",
-    );
-    for text in ["[settings]\nttl = -1\n", "[settings]\nunknown = true\n"] {
+    write(home.path(), "config.toml", "[settings]\nname = 'ipsum'\n");
+    for text in ["[settings]\ncount = -1\n", "[settings]\nunknown = true\n"] {
         write(home.path(), "conf.d/bad.toml", text);
         let error = load(home.path(), vec![&SETTINGS_REGISTRATION])
             .await

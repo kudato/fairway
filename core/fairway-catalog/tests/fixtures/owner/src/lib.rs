@@ -3,57 +3,57 @@
 
 use std::borrow::Cow;
 
-catalog::namespace!(SKILLS: Cow<'static, [u8]>, "skill", builtin);
-catalog::namespace!(GLOSSARY: Cow<'static, [u8]>, "glossary", builtin);
+catalog::namespace!(ALPHA: Cow<'static, [u8]>, "alpha-items", builtin);
+catalog::namespace!(BETA: Cow<'static, [u8]>, "beta-items", builtin);
 
-pub fn skill(address: &str) -> Option<Cow<'static, [u8]>> {
-    SKILLS.get(address)
+pub fn item(address: &str) -> Option<Cow<'static, [u8]>> {
+    ALPHA.get(address)
 }
 
-pub fn skills(pattern: &str) -> Vec<String> {
-    SKILLS.list(pattern)
+pub fn items(pattern: &str) -> Vec<String> {
+    ALPHA.list(pattern)
 }
 
-pub fn put_skill(
+pub fn put_item(
     address: &str,
     contents: Vec<u8>,
 ) -> Result<Option<Cow<'static, [u8]>>, catalog::Error> {
-    SKILLS.put(address, Cow::Owned(contents))
+    ALPHA.put(address, Cow::Owned(contents))
 }
 
-pub fn term(term: &str) -> Option<Cow<'static, [u8]>> {
-    GLOSSARY.get(term)
+pub fn beta_item(key: &str) -> Option<Cow<'static, [u8]>> {
+    BETA.get(key)
 }
 
-pub fn terms() -> Vec<String> {
-    GLOSSARY.list("*")
-}
-
-#[cfg(feature = "build")]
-pub fn build_skills(
-    skills: impl IntoIterator<Item = (String, Vec<u8>)>,
-) -> Result<(), catalog::BuildError> {
-    catalog::build("skill", skills)
+pub fn beta_items() -> Vec<String> {
+    BETA.list("*")
 }
 
 #[cfg(feature = "build")]
-pub fn build_glossary(
-    terms: impl IntoIterator<Item = (String, Vec<u8>)>,
+pub fn build_items(
+    items: impl IntoIterator<Item = (String, Vec<u8>)>,
 ) -> Result<(), catalog::BuildError> {
-    catalog::build("glossary", terms)
+    catalog::build("alpha-items", items)
+}
+
+#[cfg(feature = "build")]
+pub fn build_beta_items(
+    items: impl IntoIterator<Item = (String, Vec<u8>)>,
+) -> Result<(), catalog::BuildError> {
+    catalog::build("beta-items", items)
 }
 
 #[macro_export]
-macro_rules! embed_skills {
+macro_rules! embed_items {
     () => {
-        $crate::__private::catalog::embed!("skill");
+        $crate::__private::catalog::embed!("alpha-items");
     };
 }
 
 #[macro_export]
-macro_rules! embed_glossary {
+macro_rules! embed_beta_items {
     () => {
-        $crate::__private::catalog::embed!("glossary");
+        $crate::__private::catalog::embed!("beta-items");
     };
 }
 

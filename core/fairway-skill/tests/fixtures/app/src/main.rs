@@ -13,15 +13,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()?
         .block_on(skill::initialize())?;
 
-    let ste = skill::reference("reference/writing/ste", ())?;
-    let technical = skill::skill(
-        "skill/writing/technical",
-        BTreeMap::from([("ste", ste.as_ref())]),
+    let reference = skill::reference("reference/alpha/example-reference", ())?;
+    let example = skill::skill(
+        "skill/alpha/example-skill",
+        BTreeMap::from([("ipsum", reference.as_ref())]),
     )?;
-    print!("{}", technical.as_ref());
-    println!("{}", skill::description("skill/writing/technical")?);
-    print!("{}", skill::skill("skill/editing/proofread", ())?.as_ref());
-    println!("{}", skill::description("skill/editing/proofread")?);
+    print!("{}", example.as_ref());
+    println!("{}", skill::description("skill/alpha/example-skill")?);
+    print!("{}", skill::skill("skill/beta/other-skill", ())?.as_ref());
+    println!("{}", skill::description("skill/beta/other-skill")?);
     for address in std::env::args().skip(1) {
         print!("{}", skill::skill(&address, ())?.as_ref());
     }

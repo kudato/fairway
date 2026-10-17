@@ -24,9 +24,9 @@ use crate::{BuildError, address};
 ///
 /// ```no_run
 /// // In an owner's build helper, called from a crate's build.rs.
-/// fairway_catalog::build("skill", [
-///     ("git/commit".to_owned(), b"encoded skill".to_vec()),
-///     ("git/commit/convention".to_owned(), b"encoded resource".to_vec()),
+/// fairway_catalog::build("alpha-items", [
+///     ("lorem/ipsum".to_owned(), b"encoded lorem".to_vec()),
+///     ("lorem/ipsum/elit".to_owned(), b"encoded elit".to_vec()),
 /// ])?;
 /// # Ok::<(), fairway_catalog::BuildError>(())
 /// ```
@@ -153,47 +153,47 @@ mod tests {
     #[test]
     fn a_table_reports_every_invalid_and_repeated_address() {
         let error = check(
-            "skill",
-            &table(&["a//b", "git/*", "git/x", "git/x", "git/x"]),
+            "alpha-items",
+            &table(&["a//b", "lorem/*", "lorem/x", "lorem/x", "lorem/x"]),
         )
         .unwrap_err();
         assert_eq!(
             error.to_string(),
-            "cannot build catalog namespace \"skill\":\n  \
-             address \"skill/a//b\" has an empty part\n  \
-             address \"skill/git/*\" contains `*`\n  \
-             duplicate address \"skill/git/x\""
+            "cannot build catalog namespace \"alpha-items\":\n  \
+             address \"alpha-items/a//b\" has an empty part\n  \
+             address \"alpha-items/lorem/*\" contains `*`\n  \
+             duplicate address \"alpha-items/lorem/x\""
         );
         assert_eq!(
-            check("skill/git", &[]).unwrap_err().to_string(),
-            "cannot build catalog namespace \"skill/git\": \
+            check("alpha-items/lorem", &[]).unwrap_err().to_string(),
+            "cannot build catalog namespace \"alpha-items/lorem\": \
              a catalog namespace name cannot contain `/`"
         );
-        check("skill", &table(&["git/commit", "../escape.rs"])).unwrap();
+        check("alpha-items", &table(&["lorem/ipsum", "../escape.rs"])).unwrap();
     }
 
     #[test]
     fn a_smaller_table_removes_the_files_left_from_the_previous_one() {
         let out_dir = tempfile::tempdir().unwrap();
-        let skill = out_dir.path().join("fairway-catalog/skill");
-        let glossary = out_dir.path().join("fairway-catalog/glossary");
-        write("skill", &table(&["a", "b", "c"]), out_dir.path()).unwrap();
-        write("glossary", &table(&["a", "b"]), out_dir.path()).unwrap();
+        let alpha = out_dir.path().join("fairway-catalog/alpha-items");
+        let beta = out_dir.path().join("fairway-catalog/beta-items");
+        write("alpha-items", &table(&["a", "b", "c"]), out_dir.path()).unwrap();
+        write("beta-items", &table(&["a", "b"]), out_dir.path()).unwrap();
 
-        write("skill", &table(&["z"]), out_dir.path()).unwrap();
-        assert_eq!(files(&skill), ["0000000000000000", "entries.rs"]);
-        assert_eq!(fs::read(skill.join("0000000000000000")).unwrap(), b"z");
+        write("alpha-items", &table(&["z"]), out_dir.path()).unwrap();
+        assert_eq!(files(&alpha), ["0000000000000000", "entries.rs"]);
+        assert_eq!(fs::read(alpha.join("0000000000000000")).unwrap(), b"z");
         assert_eq!(
-            fs::read_to_string(skill.join("entries.rs")).unwrap(),
+            fs::read_to_string(alpha.join("entries.rs")).unwrap(),
             "&[\n    (\"z\", ::core::include_bytes!(\"0000000000000000\") as &'static [u8]),\n]\n"
         );
         assert_eq!(
-            files(&glossary),
+            files(&beta),
             ["0000000000000000", "0000000000000001", "entries.rs"]
         );
 
-        write("skill", &[], out_dir.path()).unwrap();
-        assert_eq!(files(&skill), ["entries.rs"]);
+        write("alpha-items", &[], out_dir.path()).unwrap();
+        assert_eq!(files(&alpha), ["entries.rs"]);
     }
 
     #[test]
@@ -201,7 +201,7 @@ mod tests {
         let out_dir = tempfile::tempdir().unwrap();
         let path = out_dir.path().join("fairway-catalog");
         fs::write(&path, b"occupied by a file").unwrap();
-        let error = write("skill", &[], out_dir.path()).unwrap_err();
+        let error = write("alpha-items", &[], out_dir.path()).unwrap_err();
         assert!(error.to_string().contains(path.to_str().unwrap()));
         assert!(error.source().is_some());
     }

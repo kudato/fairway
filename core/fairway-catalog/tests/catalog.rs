@@ -5,13 +5,10 @@ use std::{panic, sync::Barrier, thread};
 use fairway_catalog::initialize;
 
 fairway_catalog::namespace!(STATE: String, "state");
-fairway_catalog::namespace!(CONFIG: u16, "config", initial = defaults);
+fairway_catalog::namespace!(DEFAULTS: u16, "defaults", initial = defaults);
 
 fn defaults() -> Vec<(String, u16)> {
-    vec![
-        ("http/workers".to_owned(), 4),
-        ("http/port".to_owned(), 8080),
-    ]
+    vec![("lorem/two".to_owned(), 2), ("lorem/one".to_owned(), 1)]
 }
 
 // One test: the namespaces and their initialization are shared by the process.
@@ -31,8 +28,8 @@ fn catalog_lifecycle() {
     concurrent_replacements();
 
     initialize().unwrap();
-    assert_eq!(CONFIG.list("*"), ["http/port"]);
-    assert_eq!(CONFIG.get("http/port"), Some(80));
+    assert_eq!(DEFAULTS.list("*"), ["lorem/one"]);
+    assert_eq!(DEFAULTS.get("lorem/one"), Some(11));
 }
 
 fn operations_panic_before_initialization() {
@@ -51,11 +48,11 @@ fn an_empty_namespace() {
     assert_eq!(STATE.get("missing"), None);
 
     for address in [
-        "git/commit",
-        "git/hooks/pre-commit",
-        "git",
-        "rust/check",
-        "Git/commit",
+        "lorem/ipsum",
+        "lorem/sit/dolorem-ipsum",
+        "lorem",
+        "sed/tempor",
+        "Lorem/ipsum",
         "путь/задача ✓",
         // Parts are literal: no path resolution and no escaping.
         "../escape.rs",
@@ -64,43 +61,46 @@ fn an_empty_namespace() {
         assert_eq!(STATE.put(address, address.to_owned()).unwrap(), None);
         assert_eq!(STATE.get(address).as_deref(), Some(address));
     }
-    assert_eq!(STATE.list("git/*"), ["git/commit", "git/hooks/pre-commit"]);
-    assert_eq!(STATE.list("*/commit"), ["Git/commit", "git/commit"]);
-    assert_eq!(STATE.list("git"), ["git"]);
+    assert_eq!(
+        STATE.list("lorem/*"),
+        ["lorem/ipsum", "lorem/sit/dolorem-ipsum"]
+    );
+    assert_eq!(STATE.list("*/ipsum"), ["Lorem/ipsum", "lorem/ipsum"]);
+    assert_eq!(STATE.list("lorem"), ["lorem"]);
     assert_eq!(STATE.list("*задача*"), ["путь/задача ✓"]);
     assert!(STATE.list("missing/*").is_empty());
     assert_eq!(STATE.list("*").len(), 8);
 
-    let previous = STATE.put("git/commit", "replacement".to_owned()).unwrap();
-    assert_eq!(previous.as_deref(), Some("git/commit"));
-    assert_eq!(STATE.get("git/commit").as_deref(), Some("replacement"));
-    let removed = STATE.delete("git/commit").unwrap();
+    let previous = STATE.put("lorem/ipsum", "replacement".to_owned()).unwrap();
+    assert_eq!(previous.as_deref(), Some("lorem/ipsum"));
+    assert_eq!(STATE.get("lorem/ipsum").as_deref(), Some("replacement"));
+    let removed = STATE.delete("lorem/ipsum").unwrap();
     assert_eq!(removed.as_deref(), Some("replacement"));
-    assert_eq!(STATE.delete("git/commit").unwrap(), None);
-    assert_eq!(STATE.get("git/commit"), None);
-    assert_eq!(STATE.list("git/*"), ["git/hooks/pre-commit"]);
+    assert_eq!(STATE.delete("lorem/ipsum").unwrap(), None);
+    assert_eq!(STATE.get("lorem/ipsum"), None);
+    assert_eq!(STATE.list("lorem/*"), ["lorem/sit/dolorem-ipsum"]);
 }
 
 fn the_owners_values() {
-    assert_eq!(CONFIG.list("*"), ["http/port", "http/workers"]);
-    assert_eq!(CONFIG.get("http/port"), Some(8080));
-    assert_eq!(CONFIG.put("http/port", 80).unwrap(), Some(8080));
-    assert_eq!(CONFIG.delete("http/workers").unwrap(), Some(4));
-    assert_eq!(CONFIG.list("*"), ["http/port"]);
+    assert_eq!(DEFAULTS.list("*"), ["lorem/one", "lorem/two"]);
+    assert_eq!(DEFAULTS.get("lorem/one"), Some(1));
+    assert_eq!(DEFAULTS.put("lorem/one", 11).unwrap(), Some(1));
+    assert_eq!(DEFAULTS.delete("lorem/two").unwrap(), Some(2));
+    assert_eq!(DEFAULTS.list("*"), ["lorem/one"]);
 }
 
 fn invalid_addresses_change_nothing() {
     let before = STATE.list("*");
     for (address, error) in [
         ("", "address \"state/\" has an empty part"),
-        ("/git", "address \"state//git\" has an empty part"),
-        ("git/", "address \"state/git/\" has an empty part"),
+        ("/lorem", "address \"state//lorem\" has an empty part"),
+        ("lorem/", "address \"state/lorem/\" has an empty part"),
         (
-            "git//commit",
-            "address \"state/git//commit\" has an empty part",
+            "lorem//ipsum",
+            "address \"state/lorem//ipsum\" has an empty part",
         ),
-        ("git/*", "address \"state/git/*\" contains `*`"),
-        ("git/com*it", "address \"state/git/com*it\" contains `*`"),
+        ("lorem/*", "address \"state/lorem/*\" contains `*`"),
+        ("lorem/ips*m", "address \"state/lorem/ips*m\" contains `*`"),
         ("*", "address \"state/*\" contains `*`"),
     ] {
         let put = STATE.put(address, String::new()).unwrap_err();

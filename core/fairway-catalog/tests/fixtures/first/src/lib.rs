@@ -1,2 +1,2 @@
-owner::embed_skills!();
-owner::embed_glossary!();
+owner::embed_items!();
+owner::embed_beta_items!();

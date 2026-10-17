@@ -23,30 +23,33 @@ fn prepare(mode: &str, home: &Path, outside: &Path) {
                 &format!(
                     r#"[skill]
 skills_dir = "custom"
-"skill/writing/technical" = "technical.md"
-"reference/writing/ste" = "../shared/ste.md"
-"skill/мои/заметки" = {:?}
+"skill/alpha/example-skill" = "example-skill.md"
+"reference/alpha/example-reference" = "../shared/example-reference.md"
+"skill/рыба/текст" = {:?}
 "#,
-                    outside.join("notes.md").to_str().unwrap()
+                    outside.join("lorem.md").to_str().unwrap()
                 ),
             );
             write(
-                &home.join("custom/technical.md"),
-                "---\ndescription: Technical writing.\n---\n# Technical\n\n{{ ste }}",
+                &home.join("custom/example-skill.md"),
+                "---\ndescription: Lorem ipsum.\n---\n# Lorem ipsum\n\n{{ ipsum }}",
             );
-            write(&home.join("shared/ste.md"), "Write for {{ reader }}.\n");
             write(
-                &outside.join("notes.md"),
-                "---\ndescription: |\n  My notes.\n---\nLine 4\n{{ missing }}\n",
+                &home.join("shared/example-reference.md"),
+                "Dolor {{ word }}.\n",
+            );
+            write(
+                &outside.join("lorem.md"),
+                "---\ndescription: |\n  Consectetur.\n---\nLine 4\n{{ missing }}\n",
             );
         }
         "default" => {
             write(
                 &home.join("config.toml"),
-                "[skill]\n\"skill/writing/technical\" = \"my/technical.md\"\n",
+                "[skill]\n\"skill/alpha/example-skill\" = \"lorem/example-skill.md\"\n",
             );
             write(
-                &home.join("skills/my/technical.md"),
+                &home.join("skills/lorem/example-skill.md"),
                 "---\ndescription: From skills.\n---\nBody\n",
             );
         }
@@ -54,11 +57,11 @@ skills_dir = "custom"
             write(
                 &home.join("config.toml"),
                 r#"[skill]
-"skill/writing/missing" = "missing.md"
-"skill/writing/plain" = "plain.md"
-"skill/writing/valid" = "valid.md"
-"reference/writing/front" = "front.md"
-"reference/writing/syntax" = "syntax.md"
+"skill/alpha/missing" = "missing.md"
+"skill/alpha/plain" = "plain.md"
+"skill/alpha/valid" = "valid.md"
+"reference/alpha/front" = "front.md"
+"reference/alpha/syntax" = "syntax.md"
 "#,
             );
             write(&home.join("skills/plain.md"), "No frontmatter.\n");
@@ -71,8 +74,8 @@ skills_dir = "custom"
                 &home.join("config.toml"),
                 r#"[skill]
 skils_dir = "typo"
-"skill/writing" = "two-parts.md"
-"skill/writing/empty" = ""
+"skill/alpha" = "two-parts.md"
+"skill/alpha/empty" = ""
 "#,
             );
         }
@@ -85,9 +88,9 @@ async fn scenario(mode: &str) {
     match mode {
         "uninitialized" => {
             for error in [
-                fairway_skill::skill("skill/writing/technical", ()).unwrap_err(),
-                fairway_skill::reference("reference/writing/ste", ()).unwrap_err(),
-                fairway_skill::description("skill/writing/technical").unwrap_err(),
+                fairway_skill::skill("skill/alpha/example-skill", ()).unwrap_err(),
+                fairway_skill::reference("reference/alpha/example-reference", ()).unwrap_err(),
+                fairway_skill::description("skill/alpha/example-skill").unwrap_err(),
             ] {
                 assert_eq!(error.kind(), ErrorKind::NotInitialized);
                 assert_eq!(error.to_string(), "skills are not initialized successfully");
@@ -95,42 +98,45 @@ async fn scenario(mode: &str) {
         }
         "empty" => {
             fairway_skill::initialize().await.unwrap();
-            let error = fairway_skill::skill("skill/writing/technical", ()).unwrap_err();
+            let error = fairway_skill::skill("skill/alpha/example-skill", ()).unwrap_err();
             assert_eq!(error.kind(), ErrorKind::NotFound);
-            assert_eq!(error.to_string(), "no skill at \"skill/writing/technical\"");
+            assert_eq!(
+                error.to_string(),
+                "no skill at \"skill/alpha/example-skill\""
+            );
         }
         "overrides" => {
             fairway_skill::initialize().await.unwrap();
             // Repeated calls return the first result.
             fairway_skill::initialize().await.unwrap();
 
-            let ste = fairway_skill::reference(
-                "reference/writing/ste",
-                BTreeMap::from([("reader", "engineers")]),
+            let reference = fairway_skill::reference(
+                "reference/alpha/example-reference",
+                BTreeMap::from([("word", "amet")]),
             )
             .unwrap();
-            assert_eq!(ste.as_ref(), "Write for engineers.\n");
-            let technical = fairway_skill::skill(
-                "skill/writing/technical",
-                BTreeMap::from([("ste", ste.as_ref())]),
+            assert_eq!(reference.as_ref(), "Dolor amet.\n");
+            let example = fairway_skill::skill(
+                "skill/alpha/example-skill",
+                BTreeMap::from([("ipsum", reference.as_ref())]),
             )
             .unwrap();
-            assert_eq!(technical.as_ref(), "# Technical\n\nWrite for engineers.\n");
+            assert_eq!(example.as_ref(), "# Lorem ipsum\n\nDolor amet.\n");
             assert_eq!(
-                fairway_skill::description("skill/writing/technical").unwrap(),
-                "Technical writing."
+                fairway_skill::description("skill/alpha/example-skill").unwrap(),
+                "Lorem ipsum."
             );
             assert_eq!(
-                fairway_skill::description("skill/мои/заметки").unwrap(),
-                "My notes.\n"
+                fairway_skill::description("skill/рыба/текст").unwrap(),
+                "Consectetur.\n"
             );
 
             // A missing variable fails the render, at its line in the file.
-            let error = fairway_skill::skill("skill/мои/заметки", ()).unwrap_err();
+            let error = fairway_skill::skill("skill/рыба/текст", ()).unwrap_err();
             assert_eq!(error.kind(), ErrorKind::Render);
             assert_eq!(
                 error.to_string(),
-                "cannot render skill \"skill/мои/заметки\""
+                "cannot render skill \"skill/рыба/текст\""
             );
             let source = error
                 .source()
@@ -138,42 +144,43 @@ async fn scenario(mode: &str) {
                 .downcast_ref::<fairway_template::Error>()
                 .unwrap();
             assert_eq!(source.line(), Some(6), "{source}");
-            let error = fairway_skill::reference("reference/writing/ste", ()).unwrap_err();
+            let error =
+                fairway_skill::reference("reference/alpha/example-reference", ()).unwrap_err();
             assert_eq!(error.kind(), ErrorKind::Render);
 
             for (error, message) in [
                 (
-                    fairway_skill::skill("reference/writing/ste", ()).unwrap_err(),
-                    "address \"reference/writing/ste\" is not a skill address",
+                    fairway_skill::skill("reference/alpha/example-reference", ()).unwrap_err(),
+                    "address \"reference/alpha/example-reference\" is not a skill address",
                 ),
                 (
-                    fairway_skill::description("reference/writing/ste").unwrap_err(),
-                    "address \"reference/writing/ste\" is not a skill address",
+                    fairway_skill::description("reference/alpha/example-reference").unwrap_err(),
+                    "address \"reference/alpha/example-reference\" is not a skill address",
                 ),
                 (
-                    fairway_skill::reference("skill/writing/technical", ()).unwrap_err(),
-                    "address \"skill/writing/technical\" is not a reference address",
+                    fairway_skill::reference("skill/alpha/example-skill", ()).unwrap_err(),
+                    "address \"skill/alpha/example-skill\" is not a reference address",
                 ),
                 (
-                    fairway_skill::skill("skill/writing", ()).unwrap_err(),
-                    "address \"skill/writing\" must have three parts: \
+                    fairway_skill::skill("skill/alpha", ()).unwrap_err(),
+                    "address \"skill/alpha\" must have three parts: \
                      `skill/<namespace>/<name>` or `reference/<namespace>/<name>`",
                 ),
             ] {
                 assert_eq!(error.kind(), ErrorKind::InvalidAddress);
                 assert_eq!(error.to_string(), message);
             }
-            let error = fairway_skill::reference("reference/writing/other", ()).unwrap_err();
+            let error = fairway_skill::reference("reference/alpha/other", ()).unwrap_err();
             assert_eq!(error.kind(), ErrorKind::NotFound);
             assert_eq!(
                 error.to_string(),
-                "no reference at \"reference/writing/other\""
+                "no reference at \"reference/alpha/other\""
             );
         }
         "default" => {
             fairway_skill::initialize().await.unwrap();
             assert_eq!(
-                fairway_skill::skill("skill/writing/technical", ())
+                fairway_skill::skill("skill/alpha/example-skill", ())
                     .unwrap()
                     .as_ref(),
                 "Body\n"
@@ -188,21 +195,21 @@ async fn scenario(mode: &str) {
             let expected = [
                 "invalid skill overrides:".to_owned(),
                 format!(
-                    "  \"reference/writing/front\" ({}): \
+                    "  \"reference/alpha/front\" ({}): \
                      starts with frontmatter, which a reference cannot have",
                     skills.join("front.md").display()
                 ),
                 format!(
-                    "  \"reference/writing/syntax\" ({}): \
-                     reference/writing/syntax:2: cannot compile template: ",
+                    "  \"reference/alpha/syntax\" ({}): \
+                     reference/alpha/syntax:2: cannot compile template: ",
                     skills.join("syntax.md").display()
                 ),
                 format!(
-                    "  \"skill/writing/missing\": cannot open {}: ",
+                    "  \"skill/alpha/missing\": cannot open {}: ",
                     skills.join("missing.md").display()
                 ),
                 format!(
-                    "  \"skill/writing/plain\" ({}): \
+                    "  \"skill/alpha/plain\" ({}): \
                      has no frontmatter: a skill starts with a `---` line",
                     skills.join("plain.md").display()
                 ),
@@ -214,7 +221,7 @@ async fn scenario(mode: &str) {
             }
 
             // Nothing is stored, and the failure stays.
-            let error = fairway_skill::skill("skill/writing/valid", ()).unwrap_err();
+            let error = fairway_skill::skill("skill/alpha/valid", ()).unwrap_err();
             assert_eq!(error.kind(), ErrorKind::NotInitialized);
             let again = fairway_skill::initialize().await.unwrap_err();
             assert_eq!(again.to_string(), message);
@@ -224,8 +231,8 @@ async fn scenario(mode: &str) {
             assert_eq!(error.kind(), ErrorKind::Initialize);
             let message = chain(&error);
             for problem in [
-                "address \"skill/writing\" must have three parts",
-                "address \"skill/writing/empty\" has an empty path",
+                "address \"skill/alpha\" must have three parts",
+                "address \"skill/alpha/empty\" has an empty path",
                 "unknown key \"skils_dir\"",
             ] {
                 assert!(message.contains(problem), "{message}");

@@ -64,9 +64,9 @@ pub struct ArgumentsAndShutdown;
 /// before Fairway loads configuration or creates a runtime.
 ///
 /// ```
-/// fairway_cli::namespace!(CLI, "text");
-/// fairway_cli::command!(CLI, "Text commands", fairway_cli::help,
-///     long_about = "Commands for working with text.");
+/// fairway_cli::namespace!(CLI, "alpha");
+/// fairway_cli::command!(CLI, "Lorem ipsum", fairway_cli::help,
+///     long_about = "Lorem ipsum dolor sit amet.");
 /// ```
 #[derive(Clone, Copy)]
 pub struct Help;

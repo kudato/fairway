@@ -31,10 +31,7 @@ fn build_and_embed_across_consumers_and_rebuilds() {
             "first/contents.txt",
             include_str!("fixtures/first/contents.txt"),
         ),
-        (
-            "first/glossary.txt",
-            include_str!("fixtures/first/glossary.txt"),
-        ),
+        ("first/beta.txt", include_str!("fixtures/first/beta.txt")),
         (
             "first/src/lib.rs",
             include_str!("fixtures/first/src/lib.rs"),
@@ -66,30 +63,36 @@ fn build_and_embed_across_consumers_and_rebuilds() {
     }
 
     build(workspace, false);
-    assert_eq!(run(workspace, false), "builtin commit\ngit,rust\n");
     assert_eq!(
-        glossary_files(workspace),
+        run(workspace, false),
+        "Lorem ipsum dolor sit amet.\nlorem,sit\n"
+    );
+    assert_eq!(
+        beta_files(workspace),
         ["0000000000000000", "0000000000000001", "entries.rs"]
     );
 
-    // The shorter glossary leaves no files of the previous one.
-    fs::write(workspace.join("first/contents.txt"), "changed builtin\n").unwrap();
+    // The shorter beta table leaves no files of the previous one.
     fs::write(
-        workspace.join("first/glossary.txt"),
-        "git: version control\n",
+        workspace.join("first/contents.txt"),
+        "Consectetur adipiscing elit.\n",
     )
     .unwrap();
+    fs::write(workspace.join("first/beta.txt"), "lorem: ipsum dolor\n").unwrap();
     build(workspace, false);
-    assert_eq!(run(workspace, false), "changed builtin\ngit\n");
     assert_eq!(
-        glossary_files(workspace),
-        ["0000000000000000", "entries.rs"]
+        run(workspace, false),
+        "Consectetur adipiscing elit.\nlorem\n"
     );
+    assert_eq!(beta_files(workspace), ["0000000000000000", "entries.rs"]);
 
     build(workspace, true);
     fs::remove_file(workspace.join("first/contents.txt")).unwrap();
-    fs::remove_file(workspace.join("first/glossary.txt")).unwrap();
-    assert_eq!(run(workspace, true), "changed builtin\ngit\n");
+    fs::remove_file(workspace.join("first/beta.txt")).unwrap();
+    assert_eq!(
+        run(workspace, true),
+        "Consectetur adipiscing elit.\nlorem\n"
+    );
 }
 
 fn build(workspace: &Path, release: bool) {
@@ -114,11 +117,11 @@ fn run(workspace: &Path, release: bool) -> String {
     String::from_utf8(checked(&mut Command::new(executable)).stdout).unwrap()
 }
 
-/// Files of the glossary table in the first crate's debug `OUT_DIR`.
-fn glossary_files(workspace: &Path) -> Vec<String> {
+/// Files of the beta table in the first crate's debug `OUT_DIR`.
+fn beta_files(workspace: &Path) -> Vec<String> {
     let directories: Vec<_> = fs::read_dir(workspace.join("target/debug/build"))
         .unwrap()
-        .map(|entry| entry.unwrap().path().join("out/fairway-catalog/glossary"))
+        .map(|entry| entry.unwrap().path().join("out/fairway-catalog/beta-items"))
         .filter(|directory| directory.is_dir())
         .collect();
     assert_eq!(directories.len(), 1, "{directories:?}");

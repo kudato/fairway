@@ -664,20 +664,20 @@ cfg::namespace!(THIRD: Settings, "third");
 
     // Skill namespaces are checked by the application as well, wherever the
     // plugins declare them.
-    fixture.write("plugin-a/src/lib.rs", "sk::namespace!(\"writing\");\n");
-    fixture.write("plugin-b/src/lib.rs", "sk::namespace!(\"editing\");\n");
+    fixture.write("plugin-a/src/lib.rs", "sk::namespace!(\"alpha\");\n");
+    fixture.write("plugin-b/src/lib.rs", "sk::namespace!(\"beta\");\n");
     for release in [false, true] {
         successful(fixture.build(release));
         successful(fixture.check_registry(release, "skill_registry_is_valid"));
     }
-    fixture.write("plugin-b/src/lib.rs", "sk::namespace!(\"writing\");\n");
+    fixture.write("plugin-b/src/lib.rs", "sk::namespace!(\"alpha\");\n");
     for release in [false, true] {
         successful(fixture.build(release));
         let output = fixture.check_registry(release, "skill_registry_is_valid");
         let diagnostic = String::from_utf8_lossy(&output.stdout).replace('\\', "/");
         assert!(
             diagnostic.contains(
-                "duplicate skill namespace \"writing\": \
+                "duplicate skill namespace \"alpha\": \
                  plugin_a (plugin-a/src/lib.rs:1) and plugin_b (plugin-b/src/lib.rs:1)"
             ),
             "{diagnostic}"

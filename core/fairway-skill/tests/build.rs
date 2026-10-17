@@ -29,16 +29,16 @@ impl Fixture {
                 include_str!("fixtures/plugin/src/lib.rs"),
             ),
             (
-                "plugin/skills/technical.md",
-                include_str!("fixtures/plugin/skills/technical.md"),
+                "plugin/skills/example-skill.md",
+                include_str!("fixtures/plugin/skills/example-skill.md"),
             ),
             (
-                "plugin/skills/references/ste.md",
-                include_str!("fixtures/plugin/skills/references/ste.md"),
+                "plugin/skills/references/example-reference.md",
+                include_str!("fixtures/plugin/skills/references/example-reference.md"),
             ),
             (
-                "plugin/skills/proofread.md",
-                include_str!("fixtures/plugin/skills/proofread.md"),
+                "plugin/skills/other-skill.md",
+                include_str!("fixtures/plugin/skills/other-skill.md"),
             ),
             (
                 "notes/Cargo.toml",
@@ -130,13 +130,13 @@ fn rejected(output: Output, diagnostics: &[&str]) {
     }
 }
 
-const BUILTINS: &str = "# Technical writing
+const BUILTINS: &str = "# Lorem ipsum
 
-Follow these rules: Use short sentences.
+Consectetur adipiscing elit: Sed do eiusmod.
 
-Write technical documentation.
-Proofread the text.
-Proofread a text.
+Lorem ipsum dolor sit amet.
+Ut enim ad minim.
+Quis nostrud.
 ";
 
 #[test]
@@ -153,71 +153,77 @@ fn builtins_are_embedded_checked_and_overridden() {
     // Overrides replace a builtin and add a skill in a namespace no crate
     // declares; a relative path starts at `skills` in the Fairway directory.
     fixture.write(
-        "home/skills/technical.md",
-        "---\ndescription: My technical writing.\n---\nMine: {{ ste }}\n",
+        "home/skills/example-skill.md",
+        "---\ndescription: Dolor sit amet.\n---\nAliqua: {{ ipsum }}\n",
     );
-    fixture.write("notes.md", "---\ndescription: Notes.\n---\nMy notes.\n");
-    let notes = fixture.path("notes.md");
+    fixture.write(
+        "lorem.md",
+        "---\ndescription: Excepteur.\n---\nExcepteur sint.\n",
+    );
+    let lorem = fixture.path("lorem.md");
     fixture.write(
         "home/config.toml",
         &format!(
-            "[skill]\n\"skill/writing/technical\" = \"technical.md\"\n\
-             \"skill/my/notes\" = {:?}\n",
-            notes.to_str().unwrap()
+            "[skill]\n\"skill/alpha/example-skill\" = \"example-skill.md\"\n\
+             \"skill/gamma/lorem\" = {:?}\n",
+            lorem.to_str().unwrap()
         ),
     );
     assert_eq!(
-        successful(fixture.run(false, &home, &["skill/my/notes"])),
-        "Mine: Use short sentences.\n\nMy technical writing.\nProofread the text.\n\
-         Proofread a text.\nMy notes.\n"
+        successful(fixture.run(false, &home, &["skill/gamma/lorem"])),
+        "Aliqua: Sed do eiusmod.\n\nDolor sit amet.\nUt enim ad minim.\n\
+         Quis nostrud.\nExcepteur sint.\n"
     );
     fs::remove_file(home.join("config.toml")).unwrap();
 
     // A changed file is embedded again.
-    fixture.write("plugin/skills/references/ste.md", "Use the active voice.\n");
+    fixture.write(
+        "plugin/skills/references/example-reference.md",
+        "Tempor incididunt.\n",
+    );
     successful(fixture.build(false));
     assert_eq!(
         successful(fixture.run(false, &home, &[])),
-        BUILTINS.replace("Use short sentences.", "Use the active voice.")
+        BUILTINS.replace("Sed do eiusmod.", "Tempor incididunt.")
     );
 
     // The build script reports every invalid file with its address and path.
     fixture.write(
-        "plugin/skills/proofread.md",
-        "---\nname: proofread\ndescription: Proofread a text.\n---\n",
+        "plugin/skills/other-skill.md",
+        "---\nname: other-skill\ndescription: Quis nostrud.\n---\n",
     );
     fixture.write(
-        "plugin/skills/references/ste.md",
-        "---\ndescription: STE\n---\n",
+        "plugin/skills/references/example-reference.md",
+        "---\ndescription: Lorem\n---\n",
     );
     rejected(
         fixture.build(false),
         &[
-            "\"skill/editing/proofread\" (skills/proofread.md): has invalid frontmatter",
-            "\"reference/writing/ste\" (skills/references/ste.md): \
+            "\"skill/beta/other-skill\" (skills/other-skill.md): has invalid frontmatter",
+            "\"reference/alpha/example-reference\" (skills/references/example-reference.md): \
              starts with frontmatter, which a reference cannot have",
         ],
     );
     fixture.write(
-        "plugin/skills/proofread.md",
-        include_str!("fixtures/plugin/skills/proofread.md"),
+        "plugin/skills/other-skill.md",
+        include_str!("fixtures/plugin/skills/other-skill.md"),
     );
     fixture.write(
-        "plugin/skills/references/ste.md",
-        include_str!("fixtures/plugin/skills/references/ste.md"),
+        "plugin/skills/references/example-reference.md",
+        include_str!("fixtures/plugin/skills/references/example-reference.md"),
     );
 
     // Namespaces of builtins belong to the crate that embeds them, and every
     // namespace is declared once.
     fixture.write(
         "plugin/src/lib.rs",
-        "skill::namespace!(\"writing\");\nskill::embed!();\n",
+        "skill::namespace!(\"alpha\");\nskill::embed!();\n",
     );
     successful(fixture.build(false));
     rejected(
         fixture.run(false, &home, &[]),
         &[
-            "builtins in skill namespace \"editing\" that crate `skill_fixture_plugin` \
+            "builtins in skill namespace \"beta\" that crate `skill_fixture_plugin` \
            does not declare with `namespace!`: skill_fixture_plugin (plugin/src/lib.rs:2)",
         ],
     );
@@ -225,11 +231,11 @@ fn builtins_are_embedded_checked_and_overridden() {
         "plugin/src/lib.rs",
         include_str!("fixtures/plugin/src/lib.rs"),
     );
-    fixture.write("notes/src/lib.rs", "skill::namespace!(\"writing\");\n");
+    fixture.write("notes/src/lib.rs", "skill::namespace!(\"alpha\");\n");
     successful(fixture.build(false));
     rejected(
         fixture.run(false, &home, &[]),
-        &["duplicate skill namespace \"writing\": \
+        &["duplicate skill namespace \"alpha\": \
            skill_fixture_notes (notes/src/lib.rs:1) and \
            skill_fixture_plugin (plugin/src/lib.rs:1)"],
     );

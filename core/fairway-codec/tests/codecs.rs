@@ -178,12 +178,12 @@ fn ignored_json_fields_still_require_valid_utf8() {
 #[test]
 fn default_formats_and_construction_use_only_codec_api() {
     use fairway_codec::{json, toml};
-    let mut value: Json = Json::decode(br#"{"name":"fairway"}"#.to_vec()).unwrap();
+    let mut value: Json = Json::decode(br#"{"name":"example"}"#.to_vec()).unwrap();
     value.0["items"] = json!([1, 2]);
     let value: Json = Json::decode(value.encode().unwrap()).unwrap();
     assert_eq!(value.as_ref()["items"][1], 2);
     assert_eq!(Json(vec![1, 2]).encode().unwrap(), b"[1,2]\n");
-    let mut config: Toml = Toml::decode(b"name = 'fairway'".to_vec()).unwrap();
+    let mut config: Toml = Toml::decode(b"name = 'example'".to_vec()).unwrap();
     config.0["name"] = toml::Value::String("updated".into());
     let config: Toml = Toml::decode(config.encode().unwrap()).unwrap();
     assert_eq!(config.into_inner()["name"].as_str(), Some("updated"));

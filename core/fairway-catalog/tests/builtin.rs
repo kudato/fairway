@@ -4,71 +4,65 @@ use std::{borrow::Cow, ptr};
 
 use fairway_catalog::{__private, initialize};
 
-fairway_catalog::namespace!(SKILLS: Cow<'static, [u8]>, "skill", builtin);
-fairway_catalog::namespace!(GLOSSARY: Cow<'static, [u8]>, "glossary", builtin);
+fairway_catalog::namespace!(ALPHA: Cow<'static, [u8]>, "alpha-items", builtin);
+fairway_catalog::namespace!(BETA: Cow<'static, [u8]>, "beta-items", builtin);
 
-static COMMIT: [u8; 6] = *b"commit";
+static LOREM: [u8; 11] = *b"lorem ipsum";
 
 // Two crates embed into one namespace; the second one also into another.
 #[__private::linkme::distributed_slice(__private::FAIRWAY_CATALOG_BUILTINS)]
 #[linkme(crate = __private::linkme)]
 #[allow(unsafe_code, reason = "linkme places the table in a linker section")]
 static FIRST: __private::Builtin = __private::Builtin::new(
-    "skill",
-    &[
-        ("git/commit", &COMMIT),
-        ("git/commit/convention", b"convention"),
-    ],
+    "alpha-items",
+    &[("lorem/ipsum", &LOREM), ("lorem/ipsum/elit", b"elit")],
     "first crate",
 );
 
 #[__private::linkme::distributed_slice(__private::FAIRWAY_CATALOG_BUILTINS)]
 #[linkme(crate = __private::linkme)]
 #[allow(unsafe_code, reason = "linkme places the table in a linker section")]
-static SECOND_SKILLS: __private::Builtin =
-    __private::Builtin::new("skill", &[("rust/check", b"check")], "second crate");
+static SECOND_ALPHA: __private::Builtin =
+    __private::Builtin::new("alpha-items", &[("sed/tempor", b"tempor")], "second crate");
 
 #[__private::linkme::distributed_slice(__private::FAIRWAY_CATALOG_BUILTINS)]
 #[linkme(crate = __private::linkme)]
 #[allow(unsafe_code, reason = "linkme places the table in a linker section")]
-static SECOND_GLOSSARY: __private::Builtin =
-    __private::Builtin::new("glossary", &[("git", b"version control")], "second crate");
+static SECOND_BETA: __private::Builtin =
+    __private::Builtin::new("beta-items", &[("lorem", b"ipsum dolor")], "second crate");
 
 #[test]
 fn builtin_tables_are_the_initial_values() {
     initialize().unwrap();
     assert_eq!(
-        SKILLS.list("*"),
-        ["git/commit", "git/commit/convention", "rust/check"]
+        ALPHA.list("*"),
+        ["lorem/ipsum", "lorem/ipsum/elit", "sed/tempor"]
     );
-    assert_eq!(GLOSSARY.list("*"), ["git"]);
-    assert_eq!(
-        GLOSSARY.get("git").as_deref(),
-        Some(&b"version control"[..])
-    );
+    assert_eq!(BETA.list("*"), ["lorem"]);
+    assert_eq!(BETA.get("lorem").as_deref(), Some(&b"ipsum dolor"[..]));
 
-    let Some(Cow::Borrowed(commit)) = SKILLS.get("git/commit") else {
+    let Some(Cow::Borrowed(ipsum)) = ALPHA.get("lorem/ipsum") else {
         panic!("a builtin value borrows the embedded bytes");
     };
-    assert!(ptr::eq(commit, &COMMIT[..]));
+    assert!(ptr::eq(ipsum, &LOREM[..]));
 
-    let previous = SKILLS.put("git/commit", Cow::Owned(b"replacement".to_vec()));
+    let previous = ALPHA.put("lorem/ipsum", Cow::Owned(b"replacement".to_vec()));
     assert!(matches!(
         previous,
-        Ok(Some(Cow::Borrowed(bytes))) if ptr::eq(bytes, &COMMIT[..])
+        Ok(Some(Cow::Borrowed(bytes))) if ptr::eq(bytes, &LOREM[..])
     ));
     assert!(matches!(
-        SKILLS.get("git/commit"),
+        ALPHA.get("lorem/ipsum"),
         Some(Cow::Owned(bytes)) if bytes == b"replacement"
     ));
-    let removed = SKILLS.delete("rust/check").unwrap();
-    assert_eq!(removed.as_deref(), Some(&b"check"[..]));
-    assert_eq!(SKILLS.list("*"), ["git/commit", "git/commit/convention"]);
+    let removed = ALPHA.delete("sed/tempor").unwrap();
+    assert_eq!(removed.as_deref(), Some(&b"tempor"[..]));
+    assert_eq!(ALPHA.list("*"), ["lorem/ipsum", "lorem/ipsum/elit"]);
 
     initialize().unwrap();
-    assert_eq!(SKILLS.get("rust/check"), None);
+    assert_eq!(ALPHA.get("sed/tempor"), None);
     assert_eq!(
-        SKILLS.get("git/commit").as_deref(),
+        ALPHA.get("lorem/ipsum").as_deref(),
         Some(&b"replacement"[..])
     );
 }

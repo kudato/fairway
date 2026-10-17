@@ -30,9 +30,9 @@ fn empty_and_optional_contexts_still_execute_the_template() {
         empty
     );
 
-    let context = BTreeMap::from([("title", "Report")]);
+    let context = BTreeMap::from([("title", "Lorem")]);
     for context in [Some(&context), None] {
-        let expected = if context.is_some() { "Report:3" } else { empty };
+        let expected = if context.is_some() { "Lorem:3" } else { empty };
         assert_eq!(template.render(context).unwrap(), expected);
     }
 }
@@ -47,14 +47,14 @@ fn exposes_named_and_nested_values_without_a_prefix() {
     assert_eq!(
         template
             .render(json!({
-                "project": { "name": "fairway" },
+                "project": { "name": "example" },
                 "files": ["one.rs", "two.rs"],
                 "count": 2,
                 "active": true,
                 "data": "ordinary field",
             }))
             .unwrap(),
-        "fairway:one.rs, two.rs:2:True:ordinary field",
+        "example:one.rs, two.rs:2:True:ordinary field",
     );
 }
 
@@ -80,7 +80,7 @@ fn distinguishes_missing_null_and_empty_fields() {
     let template = Template::compile("default", "{{ title | default('Untitled') }}").unwrap();
     for (context, expected) in [
         (json!({}), "Untitled"),
-        (json!({ "title": "Report" }), "Report"),
+        (json!({ "title": "Lorem" }), "Lorem"),
         (json!({ "title": "" }), ""),
         (json!({ "title": null }), "None"),
         (json!({ "title": false }), "False"),
@@ -186,7 +186,7 @@ fn preserves_literal_text_and_explicit_whitespace_control() {
 
 #[test]
 fn keeps_values_literal_and_only_escapes_explicitly() {
-    for name in ["text", "report.html", "report.xml"] {
+    for name in ["text", "example.html", "example.xml"] {
         let template = Template::compile(name, "{{ value }}").unwrap();
         assert_eq!(
             template.render(json!({ "value": "<type>&value" })).unwrap(),
@@ -331,24 +331,24 @@ fn reports_owned_diagnostics_and_recovers_after_render_errors() {
             .starts_with("syntax:2: cannot compile template:")
     );
 
-    let template = Template::compile("report", "one\ntwo\n{{ branch }}").unwrap();
+    let template = Template::compile("example", "one\ntwo\n{{ ipsum }}").unwrap();
     let error = template.render(()).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Undefined);
-    assert_eq!(error.template_name(), "report");
+    assert_eq!(error.template_name(), "example");
     assert_eq!(error.line(), Some(3));
     assert!(error.source().is_some());
     assert!(
         error
             .to_string()
-            .starts_with("report:3: cannot render template:")
+            .starts_with("example:3: cannot render template:")
     );
     assert_eq!(
-        template.render(json!({ "branch": "main" })).unwrap(),
-        "one\ntwo\nmain"
+        template.render(json!({ "ipsum": "lorem" })).unwrap(),
+        "one\ntwo\nlorem"
     );
     drop(template);
     std::thread::spawn(move || {
-        assert_eq!(error.template_name(), "report");
+        assert_eq!(error.template_name(), "example");
         assert!(error.source().is_some());
     })
     .join()

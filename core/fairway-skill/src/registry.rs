@@ -110,16 +110,16 @@ mod tests {
     fn every_problem_is_reported_with_its_sources() {
         let error = check(
             &[
-                Registration::new("writing", "plugin_b", "plugin_b (b.rs:1)"),
-                Registration::new("writing", "plugin_a", "plugin_a (a.rs:1)"),
-                Registration::new("editing", "plugin_b", "plugin_b (b.rs:2)"),
+                Registration::new("alpha", "plugin_b", "plugin_b (b.rs:1)"),
+                Registration::new("alpha", "plugin_a", "plugin_a (a.rs:1)"),
+                Registration::new("beta", "plugin_b", "plugin_b (b.rs:2)"),
                 // A registering submodule is reduced to its crate before matching.
-                Registration::new("drafts", "plugin_a::skills", "plugin_a::skills (a.rs:2)"),
+                Registration::new("delta", "plugin_a::skills", "plugin_a::skills (a.rs:2)"),
                 // Crate `plugin` does not own the namespaces of crate `plugin_a`.
-                Registration::new("notes", "plugin", "plugin (p.rs:1)"),
+                Registration::new("gamma", "plugin", "plugin (p.rs:1)"),
             ],
             &[Embedded::new(
-                &["drafts", "editing", "notes", "writing"],
+                &["alpha", "beta", "delta", "gamma"],
                 "plugin_a::skills",
                 "plugin_a::skills (a.rs:9)",
             )],
@@ -128,10 +128,10 @@ mod tests {
         assert_eq!(
             error,
             "invalid skill namespaces:\n  \
-             duplicate skill namespace \"writing\": plugin_a (a.rs:1) and plugin_b (b.rs:1)\n  \
-             builtins in skill namespace \"editing\" that crate `plugin_a` does not declare \
+             duplicate skill namespace \"alpha\": plugin_a (a.rs:1) and plugin_b (b.rs:1)\n  \
+             builtins in skill namespace \"beta\" that crate `plugin_a` does not declare \
              with `namespace!`: plugin_a::skills (a.rs:9)\n  \
-             builtins in skill namespace \"notes\" that crate `plugin_a` does not declare \
+             builtins in skill namespace \"gamma\" that crate `plugin_a` does not declare \
              with `namespace!`: plugin_a::skills (a.rs:9)"
         );
     }

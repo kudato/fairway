@@ -1,1 +1,1 @@
-builtin commit
+Lorem ipsum dolor sit amet.

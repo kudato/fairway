@@ -32,12 +32,12 @@ use crate::{
 ///     retries: u32,
 /// }
 ///
-/// let bytes = br#"{ "name": "fairway", "retries": 3 }"#.to_vec();
+/// let bytes = br#"{ "name": "example", "retries": 3 }"#.to_vec();
 /// let Json(mut settings) = Json::<Settings>::decode(bytes)?;
 /// settings.retries += 1;
 /// assert_eq!(
 ///     Json(&settings).encode()?,
-///     b"{\"name\":\"fairway\",\"retries\":4}\n"
+///     b"{\"name\":\"example\",\"retries\":4}\n"
 /// );
 /// # Ok::<(), fairway_codec::Error>(())
 /// ```
@@ -127,17 +127,17 @@ impl<T: Serialize> Encode for Json<T> {
 /// use serde::{Deserialize, Serialize};
 ///
 /// #[derive(Deserialize, Serialize)]
-/// struct Manifest {
+/// struct Record {
 ///     name: String,
 ///     tags: Vec<String>,
 /// }
 ///
-/// let bytes = b"# Plugin manifest\nname = \"notes\"\ntags = []\n".to_vec();
-/// let Toml(mut manifest) = Toml::<Manifest>::decode(bytes)?;
-/// manifest.tags.push("text".to_owned());
+/// let bytes = b"# Example\nname = \"alpha\"\ntags = []\n".to_vec();
+/// let Toml(mut record) = Toml::<Record>::decode(bytes)?;
+/// record.tags.push("text".to_owned());
 /// assert_eq!(
-///     Toml(&manifest).encode()?,
-///     b"name = \"notes\"\ntags = [\"text\"]\n"
+///     Toml(&record).encode()?,
+///     b"name = \"alpha\"\ntags = [\"text\"]\n"
 /// );
 /// # Ok::<(), fairway_codec::Error>(())
 /// ```
@@ -318,7 +318,7 @@ impl<T: Serialize> Encode for Yaml<T> {
 /// use fairway_codec::markdown::{Event, Tag, TagEnd};
 /// use fairway_codec::{Decode, Encode, Markdown};
 ///
-/// let document = Markdown::decode(b"# Notes\n\nSome *text*.\n".to_vec())?;
+/// let document = Markdown::decode(b"# Lorem ipsum\n\nDolor *sit* amet.\n".to_vec())?;
 ///
 /// let mut in_heading = false;
 /// let mut headings = Vec::new();
@@ -330,10 +330,10 @@ impl<T: Serialize> Encode for Yaml<T> {
 ///         _ => {}
 ///     }
 /// }
-/// assert_eq!(headings, ["Notes"]);
+/// assert_eq!(headings, ["Lorem ipsum"]);
 ///
 /// let Ok(bytes) = document.encode();
-/// assert_eq!(bytes, b"# Notes\n\nSome *text*.\n");
+/// assert_eq!(bytes, b"# Lorem ipsum\n\nDolor *sit* amet.\n");
 /// # Ok::<(), fairway_codec::Error>(())
 /// ```
 #[derive(Debug, Clone)]

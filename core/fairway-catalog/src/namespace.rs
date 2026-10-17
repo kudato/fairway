@@ -18,9 +18,9 @@ type Values<V> = BTreeMap<Cow<'static, str>, V>;
 ///
 /// Declared by [`namespace!`](crate::namespace), which also chooses how
 /// [`initialize`](crate::initialize) fills it. Addresses are relative to the
-/// namespace: `git/commit` in the namespace `skill` is the full address
-/// `skill/git/commit`. Changes are made in place under the namespace's lock and
-/// last for the rest of the process.
+/// namespace: `lorem/ipsum` in the namespace `alpha-items` is the full address
+/// `alpha-items/lorem/ipsum`. Changes are made in place under the namespace's
+/// lock and last for the rest of the process.
 ///
 /// # Panics
 ///
@@ -110,8 +110,8 @@ impl<V> Namespace<V> {
     /// Returns the addresses matching `pattern` in lexicographic order.
     ///
     /// `*` matches any characters, including `/`; other characters are
-    /// literal. `"*"` lists the whole namespace, and `"git/*"` lists every
-    /// address that starts with `git/`.
+    /// literal. `"*"` lists the whole namespace, and `"lorem/*"` lists every
+    /// address that starts with `lorem/`.
     pub fn list(&self, pattern: &str) -> Vec<String> {
         let pattern = Pattern::new(pattern);
         self.read()

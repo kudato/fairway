@@ -57,9 +57,12 @@ impl Entry {
 ///
 /// fn main() -> Result<(), fairway_skill::BuildError> {
 ///     fairway_skill::build([
-///         Entry::new("skill/writing/technical", "skills/technical.md"),
-///         Entry::new("reference/writing/ste", "skills/references/ste.md"),
-///         Entry::new("skill/editing/proofread", "skills/proofread.md"),
+///         Entry::new("skill/alpha/example-skill", "skills/example-skill.md"),
+///         Entry::new(
+///             "reference/alpha/example-reference",
+///             "skills/references/example-reference.md",
+///         ),
+///         Entry::new("skill/beta/other-skill", "skills/other-skill.md"),
 ///     ])
 /// }
 /// ```
@@ -211,21 +214,25 @@ mod tests {
     #[test]
     fn builtins_are_compressed_by_kind_with_their_namespaces() {
         let root = tempfile::tempdir().unwrap();
-        let technical = "---\ndescription: Write docs.\n---\n# Technical\n";
+        let example = "---\ndescription: Lorem ipsum.\n---\n# Lorem ipsum\n";
         files(
             root.path(),
             &[
-                ("skills/technical.md", technical),
-                ("skills/ste.md", "# STE\n"),
-                ("proofread.md", "---\ndescription: Proofread.\n---\n"),
+                ("skills/example-skill.md", example),
+                ("skills/example-reference.md", "# Dolor sit\n"),
+                ("other-skill.md", "---\ndescription: Consectetur.\n---\n"),
             ],
         );
+        // Skills keep the order of the entries; namespaces are sorted.
         let builtins = prepare(
             root.path(),
             &[
-                Entry::new("skill/writing/technical", "skills/technical.md"),
-                Entry::new("reference/writing/ste", "skills/ste.md"),
-                Entry::new("skill/editing/proofread", "proofread.md"),
+                Entry::new("skill/beta/other-skill", "other-skill.md"),
+                Entry::new(
+                    "reference/alpha/example-reference",
+                    "skills/example-reference.md",
+                ),
+                Entry::new("skill/alpha/example-skill", "skills/example-skill.md"),
             ],
         )
         .unwrap();
@@ -237,23 +244,20 @@ mod tests {
         assert_eq!(
             skills,
             [
-                ("writing/technical", technical.to_owned()),
                 (
-                    "editing/proofread",
-                    "---\ndescription: Proofread.\n---\n".to_owned()
+                    "beta/other-skill",
+                    "---\ndescription: Consectetur.\n---\n".to_owned()
                 ),
+                ("alpha/example-skill", example.to_owned()),
             ]
         );
         assert_eq!(builtins.references.len(), 1);
-        assert_eq!(builtins.references[0].0, "writing/ste");
+        assert_eq!(builtins.references[0].0, "alpha/example-reference");
         assert_eq!(
             store::decode(builtins.references[0].1.clone().into()),
-            "# STE\n"
+            "# Dolor sit\n"
         );
-        assert_eq!(
-            namespaces(&builtins.namespaces),
-            "&[\"editing\", \"writing\"]\n"
-        );
+        assert_eq!(namespaces(&builtins.namespaces), "&[\"alpha\", \"beta\"]\n");
         assert_eq!(namespaces(&Default::default()), "&[]\n");
     }
 
@@ -273,14 +277,14 @@ mod tests {
         let error = prepare(
             root.path(),
             &[
-                Entry::new("skill/writing", "ok.md"),
-                Entry::new("skill/writing/ok", "ok.md"),
-                Entry::new("skill/writing/ok", "named.md"),
-                Entry::new("skill/writing/named", "named.md"),
-                Entry::new("skill/writing/plain", "plain.md"),
-                Entry::new("reference/writing/front", "front.md"),
-                Entry::new("reference/writing/syntax", "syntax.md"),
-                Entry::new("reference/writing/missing", "missing.md"),
+                Entry::new("skill/alpha", "ok.md"),
+                Entry::new("skill/alpha/ok", "ok.md"),
+                Entry::new("skill/alpha/ok", "named.md"),
+                Entry::new("skill/alpha/named", "named.md"),
+                Entry::new("skill/alpha/plain", "plain.md"),
+                Entry::new("reference/alpha/front", "front.md"),
+                Entry::new("reference/alpha/syntax", "syntax.md"),
+                Entry::new("reference/alpha/missing", "missing.md"),
             ],
         )
         .unwrap_err()
@@ -294,38 +298,37 @@ mod tests {
         assert_eq!(lines[0], "cannot build skills:");
         assert_eq!(
             lines[1],
-            "  \"skill/writing\" (ok.md): the address must have three parts: \
+            "  \"skill/alpha\" (ok.md): the address must have three parts: \
              `skill/<namespace>/<name>` or `reference/<namespace>/<name>`"
         );
         assert_eq!(
             lines[2],
-            "  duplicate address \"skill/writing/ok\": ok.md and named.md"
+            "  duplicate address \"skill/alpha/ok\": ok.md and named.md"
         );
         assert!(
-            lines[3].starts_with("  \"skill/writing/named\" (named.md): has invalid frontmatter: "),
+            lines[3].starts_with("  \"skill/alpha/named\" (named.md): has invalid frontmatter: "),
             "{error}"
         );
         assert_eq!(
             lines[4],
-            "  \"skill/writing/plain\" (plain.md): has no frontmatter: \
+            "  \"skill/alpha/plain\" (plain.md): has no frontmatter: \
              a skill starts with a `---` line"
         );
         assert_eq!(
             lines[5],
-            "  \"reference/writing/front\" (front.md): \
+            "  \"reference/alpha/front\" (front.md): \
              starts with frontmatter, which a reference cannot have"
         );
         assert!(
             lines[6].starts_with(
-                "  \"reference/writing/syntax\" (syntax.md): \
-                 reference/writing/syntax:1: cannot compile template: "
+                "  \"reference/alpha/syntax\" (syntax.md): \
+                 reference/alpha/syntax:1: cannot compile template: "
             ),
             "{error}"
         );
         assert!(
-            lines[7].starts_with(
-                "  \"reference/writing/missing\" (missing.md): cannot read the file: "
-            ),
+            lines[7]
+                .starts_with("  \"reference/alpha/missing\" (missing.md): cannot read the file: "),
             "{error}"
         );
     }

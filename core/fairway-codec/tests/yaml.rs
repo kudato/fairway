@@ -8,7 +8,7 @@ use serde::Serialize;
 #[test]
 fn default_values_use_codec_json_types_and_strict_booleans() {
     let mut value: Yaml = Yaml::decode(
-        b"name: fairway\nenabled: true\ndisabled: false\nanswer: no\ncount: 2\noptional: null\nitems: &items [one, two]\ncopy: *items\n".to_vec(),
+        b"name: example\nenabled: true\ndisabled: false\nanswer: no\ncount: 2\noptional: null\nitems: &items [one, two]\ncopy: *items\n".to_vec(),
     )
     .unwrap();
     assert_eq!(value.0["enabled"], true);
@@ -25,7 +25,7 @@ fn default_values_use_codec_json_types_and_strict_booleans() {
 
 #[test]
 fn concrete_types_support_values_outside_the_json_data_model() {
-    let expected = BTreeMap::from([(vec![1_u8, 2], "rules".to_owned())]);
+    let expected = BTreeMap::from([(vec![1_u8, 2], "lorem".to_owned())]);
     let bytes = Yaml(&expected).encode().unwrap();
     assert_eq!(
         Yaml::<BTreeMap<Vec<u8>, String>>::decode(bytes)
@@ -36,16 +36,13 @@ fn concrete_types_support_values_outside_the_json_data_model() {
     let bytes = Yaml(f64::INFINITY).encode().unwrap();
     assert_eq!(Yaml::<f64>::decode(bytes).unwrap().0, f64::INFINITY);
 
-    let input = "# Instructions\ndescription: |\n  Подготовь коммит.\n  Проверь изменения.\n";
-    let skill = Yaml::<BTreeMap<String, String>>::decode(input.as_bytes().to_vec()).unwrap();
-    assert_eq!(
-        skill.as_ref()["description"],
-        "Подготовь коммит.\nПроверь изменения.\n"
-    );
-    let bytes = skill.clone().encode().unwrap();
+    let input = "# Lorem ipsum\nbody: |\n  Лорем ипсум.\n  Долор сит амет.\n";
+    let record = Yaml::<BTreeMap<String, String>>::decode(input.as_bytes().to_vec()).unwrap();
+    assert_eq!(record.as_ref()["body"], "Лорем ипсум.\nДолор сит амет.\n");
+    let bytes = record.clone().encode().unwrap();
     assert_eq!(
         Yaml::<BTreeMap<String, String>>::decode(bytes).unwrap(),
-        skill
+        record
     );
 }
 
@@ -55,7 +52,7 @@ fn multiple_documents_and_duplicate_keys_are_errors() {
         "one\n---\ntwo\n",
         "one\n...\n---\ntwo\n",
         "name: first\nname: second\n",
-        "metadata:\n  team: one\n  team: two\n",
+        "extra:\n  alpha: one\n  alpha: two\n",
     ] {
         let error = Yaml::<json::Value>::decode(input.as_bytes().to_vec()).unwrap_err();
         assert!(error.source().unwrap().is::<yaml::DecodeError>());

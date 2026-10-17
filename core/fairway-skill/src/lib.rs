@@ -10,11 +10,11 @@
 //!
 //! ```markdown
 //! ---
-//! description: Write technical documentation in plain English.
+//! description: Lorem ipsum dolor sit amet.
 //! ---
-//! # Technical writing
+//! # Lorem ipsum
 //!
-//! For English text, follow these rules: {{ ste }}
+//! Consectetur adipiscing elit: {{ ipsum }}
 //! ```
 //!
 //! # Getting skills and references
@@ -34,16 +34,18 @@
 //!
 //! #[derive(Serialize)]
 //! #[serde(crate = "fairway_codec::serde")]
-//! struct Technical<'a> {
-//!     ste: &'a str,
+//! struct Variables<'a> {
+//!     ipsum: &'a str,
 //! }
 //!
-//! let ste = fairway_skill::reference("reference/writing/ste", ())?;
-//! let technical = fairway_skill::skill(
-//!     "skill/writing/technical",
-//!     Technical { ste: ste.as_ref() },
+//! let reference = fairway_skill::reference("reference/alpha/example-reference", ())?;
+//! let skill = fairway_skill::skill(
+//!     "skill/alpha/example-skill",
+//!     Variables {
+//!         ipsum: reference.as_ref(),
+//!     },
 //! )?;
-//! let description = fairway_skill::description("skill/writing/technical")?;
+//! let description = fairway_skill::description("skill/alpha/example-skill")?;
 //! # Ok::<(), fairway_skill::Error>(())
 //! ```
 //!
@@ -94,9 +96,9 @@
 //!
 //! ```toml
 //! [skill]
-//! skills_dir = "/Users/me/skills"
-//! "skill/writing/technical" = "my/technical.md"
-//! "skill/my/notes" = "/Users/me/notes.md"
+//! skills_dir = "/path/to/skills"
+//! "skill/alpha/example-skill" = "lorem/example-skill.md"
+//! "skill/gamma/lorem" = "/path/to/lorem.md"
 //! ```
 //!
 //! A key with `/` is an address, and its value is the path of a file. A
@@ -159,8 +161,8 @@ pub async fn initialize() -> Result<(), Error> {
 /// struct; its fields are the template's variables. Pass `()` for none.
 ///
 /// ```no_run
-/// let technical = fairway_skill::skill("skill/writing/technical", ())?;
-/// println!("{}", technical.as_ref());
+/// let skill = fairway_skill::skill("skill/alpha/example-skill", ())?;
+/// println!("{}", skill.as_ref());
 /// # Ok::<(), fairway_skill::Error>(())
 /// ```
 ///
@@ -186,8 +188,8 @@ pub fn skill<C: Serialize>(address: &str, variables: C) -> Result<Markdown, Erro
 /// struct; its fields are the template's variables. Pass `()` for none.
 ///
 /// ```no_run
-/// let ste = fairway_skill::reference("reference/writing/ste", ())?;
-/// println!("{}", ste.as_ref());
+/// let reference = fairway_skill::reference("reference/alpha/example-reference", ())?;
+/// println!("{}", reference.as_ref());
 /// # Ok::<(), fairway_skill::Error>(())
 /// ```
 ///
@@ -209,7 +211,7 @@ pub fn reference<C: Serialize>(address: &str, variables: C) -> Result<Markdown, 
 /// Returns the description of the skill at `address`, from its frontmatter.
 ///
 /// ```no_run
-/// let description = fairway_skill::description("skill/writing/technical")?;
+/// let description = fairway_skill::description("skill/alpha/example-skill")?;
 /// # Ok::<(), fairway_skill::Error>(())
 /// ```
 ///
@@ -287,8 +289,8 @@ pub fn validate_registry() {
 /// [`validate_registry`] reports a namespace declared more than once.
 ///
 /// ```
-/// fairway_skill::namespace!("writing");
-/// fairway_skill::namespace!("editing");
+/// fairway_skill::namespace!("alpha");
+/// fairway_skill::namespace!("beta");
 /// ```
 #[macro_export]
 macro_rules! namespace {

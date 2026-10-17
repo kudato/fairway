@@ -1,3 +1,3 @@
-skill::namespace!("writing");
-skill::namespace!("editing");
+skill::namespace!("alpha");
+skill::namespace!("beta");
 skill::embed!();

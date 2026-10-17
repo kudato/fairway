@@ -120,7 +120,7 @@ pub(crate) fn check(name: &str, kind: Kind, text: &str) -> Vec<String> {
 mod tests {
     use super::{Kind, check, split};
 
-    const ADDRESS: &str = "skill/writing/technical";
+    const ADDRESS: &str = "skill/alpha/example-skill";
 
     fn problems(kind: Kind, text: &str) -> Vec<String> {
         check(ADDRESS, kind, text)
@@ -128,11 +128,11 @@ mod tests {
 
     #[test]
     fn a_skill_is_split_into_frontmatter_and_body() {
-        let skill = split("---\ndescription: Write docs.\n---\n# Body\n").unwrap();
-        assert_eq!(skill.frontmatter, "---\ndescription: Write docs.\n");
+        let skill = split("---\ndescription: Lorem ipsum.\n---\n# Body\n").unwrap();
+        assert_eq!(skill.frontmatter, "---\ndescription: Lorem ipsum.\n");
         assert_eq!(skill.body, "# Body\n");
         assert_eq!(skill.lines, 3);
-        assert_eq!(skill.description().unwrap(), "Write docs.");
+        assert_eq!(skill.description().unwrap(), "Lorem ipsum.");
 
         let skill = split("---\r\ndescription: x\r\n---\r\n\r\nBody").unwrap();
         assert_eq!(skill.body, "\r\nBody");
@@ -184,9 +184,12 @@ mod tests {
             ),
             ("---\ndescription: \"\"\n---\n", "has an empty description"),
             ("---\n---\n", "has invalid frontmatter: "),
-            ("---\nname: technical\n---\n", "has invalid frontmatter: "),
             (
-                "---\nname: technical\ndescription: x\n---\n",
+                "---\nname: example-skill\n---\n",
+                "has invalid frontmatter: ",
+            ),
+            (
+                "---\nname: example-skill\ndescription: x\n---\n",
                 "has invalid frontmatter: ",
             ),
             ("---\ndescription: [x]\n---\n", "has invalid frontmatter: "),
@@ -204,14 +207,14 @@ mod tests {
         assert_eq!(problems.len(), 2, "{problems:?}");
         assert_eq!(problems[0], "has an empty description");
         assert!(
-            problems[1].starts_with("skill/writing/technical:4: cannot compile template: "),
+            problems[1].starts_with("skill/alpha/example-skill:4: cannot compile template: "),
             "{problems:?}"
         );
     }
 
     #[test]
     fn a_reference_is_a_template_without_frontmatter() {
-        assert!(problems(Kind::Reference, "# STE\n\n{{ x }}\n").is_empty());
+        assert!(problems(Kind::Reference, "# Lorem ipsum\n\n{{ x }}\n").is_empty());
         assert!(problems(Kind::Reference, "---\n\nA thematic break.\n").is_empty());
         assert_eq!(
             problems(Kind::Reference, "---\ndescription: x\n---\nText\n"),
@@ -220,7 +223,7 @@ mod tests {
         let problems = problems(Kind::Reference, "Text\n{% endif %}\n");
         assert_eq!(problems.len(), 1, "{problems:?}");
         assert!(
-            problems[0].starts_with("skill/writing/technical:2: cannot compile template: "),
+            problems[0].starts_with("skill/alpha/example-skill:2: cannot compile template: "),
             "{problems:?}"
         );
     }

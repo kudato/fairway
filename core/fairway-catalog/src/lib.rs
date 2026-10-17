@@ -2,10 +2,10 @@
 //!
 //! A crate that owns a namespace declares it with [`namespace!`] and keeps the
 //! static private: other crates use the owner's API. A namespace holds values
-//! of the owner's type by address, such as `git/commit`; together with the
-//! namespace name this is the full address `skill/git/commit`. Fairway calls
-//! [`initialize`] at startup, which checks every linked namespace and fills
-//! all of them or none.
+//! of the owner's type by address, such as `lorem/ipsum`; together with the
+//! namespace name this is the full address `alpha-items/lorem/ipsum`. Fairway
+//! calls [`initialize`] at startup, which checks every linked namespace and
+//! fills all of them or none.
 //!
 //! A namespace starts empty, receives the builtin tables that crates prepare
 //! with `build` in their build scripts (the `build` feature) and include with
@@ -84,12 +84,12 @@ pub fn initialize() -> Result<(), Error> {
 /// use std::borrow::Cow;
 ///
 /// fn defaults() -> Vec<(String, u16)> {
-///     vec![("http/port".to_owned(), 8080)]
+///     vec![("lorem/one".to_owned(), 1)]
 /// }
 ///
 /// fairway_catalog::namespace!(STATE: String, "doc-state");
-/// fairway_catalog::namespace!(SKILLS: Cow<'static, [u8]>, "doc-skill", builtin);
-/// fairway_catalog::namespace!(CONFIG: u16, "doc-config", initial = defaults);
+/// fairway_catalog::namespace!(ITEMS: Cow<'static, [u8]>, "doc-items", builtin);
+/// fairway_catalog::namespace!(DEFAULTS: u16, "doc-defaults", initial = defaults);
 /// ```
 #[macro_export]
 macro_rules! namespace {

@@ -1,6 +1,6 @@
 //! Rules for namespace names and addresses.
 //!
-//! A full address is `namespace/address`, for example `skill/git/commit`.
+//! A full address is `namespace/address`, for example `alpha-items/lorem/ipsum`.
 //! Its parts are separated by `/`, none of them is empty, and none contains
 //! `*`, which lists use as a mask. A namespace name is therefore one part.
 
@@ -53,17 +53,17 @@ mod tests {
     #[test]
     fn a_namespace_name_is_one_part() {
         for (name, expected) in [
-            ("skill", Ok(())),
-            ("plugin-guide_2", Ok(())),
+            ("alpha", Ok(())),
+            ("lorem-ipsum_2", Ok(())),
             ("задачи", Ok(())),
             ("..", Ok(())),
             ("", Err("a catalog namespace name cannot be empty")),
             (
-                "skill/git",
+                "alpha/lorem",
                 Err("a catalog namespace name cannot contain `/`"),
             ),
             ("/", Err("a catalog namespace name cannot contain `/`")),
-            ("skill*", Err("a catalog namespace name cannot contain `*`")),
+            ("alpha*", Err("a catalog namespace name cannot contain `*`")),
             ("*", Err("a catalog namespace name cannot contain `*`")),
         ] {
             assert_eq!(check_name(name), expected, "name {name:?}");

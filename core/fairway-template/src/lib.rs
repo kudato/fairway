@@ -9,19 +9,19 @@
 //!
 //! #[derive(Serialize)]
 //! #[serde(crate = "fairway_codec::serde")]
-//! struct Report<'a> {
-//!     branch: &'a str,
-//!     files: &'a [&'a str],
+//! struct Record<'a> {
+//!     ipsum: &'a str,
+//!     items: &'a [&'a str],
 //! }
 //!
 //! let template = Template::compile(
-//!     "report",
-//!     "Branch: {{ branch }}\nFiles: {{ files | join(', ') }}\n",
+//!     "example",
+//!     "Ipsum: {{ ipsum }}\nItems: {{ items | join(', ') }}\n",
 //! )?;
-//! let report = Report { branch: "main", files: &["one.rs", "two.rs"] };
+//! let record = Record { ipsum: "lorem", items: &["alpha", "beta"] };
 //! assert_eq!(
-//!     template.render(&report)?,
-//!     "Branch: main\nFiles: one.rs, two.rs\n",
+//!     template.render(&record)?,
+//!     "Ipsum: lorem\nItems: alpha, beta\n",
 //! );
 //! # Ok::<(), fairway_template::Error>(())
 //! ```

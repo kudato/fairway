@@ -60,7 +60,7 @@ impl<'de> Deserialize<'de> for Settings {
 
 fairway_config::namespace!(ALPHA: Settings, "alpha");
 fairway_config::namespace!(BETA: Settings, "beta");
-fairway_config::namespace!(DOCUMENTS: BTreeMap<String, BTreeMap<String, String>>, "documents");
+fairway_config::namespace!(GAMMA: BTreeMap<String, BTreeMap<String, String>>, "gamma");
 
 fn config(home: &Path, beta: &str) {
     std::fs::write(
@@ -147,7 +147,7 @@ async fn scenario(mode: &str, home: &Path) {
         "set" => {
             config(home, "20");
             let primary = format!(
-                "{}[documents.paths]\ninherited = 'base'\n",
+                "{}[gamma.entries]\ninherited = 'base'\n",
                 std::fs::read_to_string(home.join("config.toml")).unwrap()
             );
             std::fs::write(home.join("config.toml"), &primary).unwrap();
@@ -158,19 +158,19 @@ async fn scenario(mode: &str, home: &Path) {
 
             ALPHA.set(&["value"], 40).await.unwrap();
             BETA.set(&["value"], 50).await.unwrap();
-            DOCUMENTS
-                .set(&["paths", "skill/git/commit.md"], "original")
+            GAMMA
+                .set(&["entries", "lorem/ipsum.md"], "original")
                 .await
                 .unwrap();
-            DOCUMENTS
-                .set(&["paths", "skill/git/commit.md"], "updated")
+            GAMMA
+                .set(&["entries", "lorem/ipsum.md"], "updated")
                 .await
                 .unwrap();
             let mut tasks = Vec::new();
             for index in 0..8 {
                 tasks.push(tokio::spawn(async move {
-                    let key = format!("reference/git/{index}");
-                    DOCUMENTS.set(&["paths", &key], index.to_string()).await
+                    let key = format!("dolor/{index}");
+                    GAMMA.set(&["entries", &key], index.to_string()).await
                 }));
             }
             for task in tasks {
@@ -188,13 +188,13 @@ async fn scenario(mode: &str, home: &Path) {
                 .into_inner();
             assert_eq!(automatic["alpha"]["value"].as_integer(), Some(40));
             assert_eq!(automatic["beta"]["value"].as_integer(), Some(50));
-            let paths = automatic["documents"]["paths"].as_table().unwrap();
-            assert_eq!(paths.len(), 9);
-            assert!(!paths.contains_key("inherited"));
-            assert_eq!(paths["skill/git/commit.md"].as_str(), Some("updated"));
+            let entries = automatic["gamma"]["entries"].as_table().unwrap();
+            assert_eq!(entries.len(), 9);
+            assert!(!entries.contains_key("inherited"));
+            assert_eq!(entries["lorem/ipsum.md"].as_str(), Some("updated"));
             for index in 0..8 {
                 assert_eq!(
-                    paths[&format!("reference/git/{index}")].as_str(),
+                    entries[&format!("dolor/{index}")].as_str(),
                     Some(index.to_string().as_str())
                 );
             }
@@ -209,7 +209,7 @@ async fn scenario(mode: &str, home: &Path) {
 
             assert_eq!(ALPHA.get().value, 30);
             assert_eq!(BETA.get().value, 20);
-            assert_eq!(DOCUMENTS.get()["paths"].len(), 1);
+            assert_eq!(GAMMA.get()["entries"].len(), 1);
             // A lower-priority change remains visible on the next startup.
             std::fs::write(
                 home.join("config.toml"),
@@ -221,10 +221,10 @@ async fn scenario(mode: &str, home: &Path) {
             initialize().await.unwrap();
             assert_eq!(ALPHA.get().value, 40);
             assert_eq!(BETA.get().value, 50);
-            let paths = &DOCUMENTS.get()["paths"];
-            assert_eq!(paths.len(), 10);
-            assert_eq!(paths["inherited"], "changed");
-            assert_eq!(paths["skill/git/commit.md"], "updated");
+            let entries = &GAMMA.get()["entries"];
+            assert_eq!(entries.len(), 10);
+            assert_eq!(entries["inherited"], "changed");
+            assert_eq!(entries["lorem/ipsum.md"], "updated");
         }
         "invalid" => {
             config(home, "20");

@@ -7,30 +7,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Fairway's part: the catalog is initialized at startup.
     catalog::initialize()?;
 
-    let Some(Cow::Borrowed(commit)) = owner::skill("git/commit") else {
+    let Some(Cow::Borrowed(ipsum)) = owner::item("lorem/ipsum") else {
         panic!("a builtin value borrows the embedded bytes");
     };
-    assert_eq!(owner::skill("empty").as_deref(), Some(&b""[..]));
+    assert_eq!(owner::item("empty").as_deref(), Some(&b""[..]));
     assert_eq!(
-        owner::skill("literal/\"quote\"\\path\n\0/✓").as_deref(),
+        owner::item("literal/\"quote\"\\path\n\0/✓").as_deref(),
         Some(&[0, 255, 128, 0][..])
     );
     assert_eq!(
-        owner::skill("../../escape.rs").as_deref(),
+        owner::item("../../escape.rs").as_deref(),
         Some(&b"opaque address"[..])
     );
     assert_eq!(
-        owner::skills("git/*"),
-        ["git/commit", "git/hooks/pre-commit"]
+        owner::items("lorem/*"),
+        ["lorem/ipsum", "lorem/sit/dolorem-ipsum"]
     );
-    assert_eq!(owner::term("git").as_deref(), Some(&b"version control"[..]));
-    print!("{}", std::str::from_utf8(commit)?);
-    println!("{}", owner::terms().join(","));
+    assert_eq!(
+        owner::beta_item("lorem").as_deref(),
+        Some(&b"ipsum dolor"[..])
+    );
+    print!("{}", std::str::from_utf8(ipsum)?);
+    println!("{}", owner::beta_items().join(","));
 
-    owner::put_skill("git/commit", b"replacement".to_vec())?;
+    owner::put_item("lorem/ipsum", b"replacement".to_vec())?;
     catalog::initialize()?;
     assert_eq!(
-        owner::skill("git/commit").as_deref(),
+        owner::item("lorem/ipsum").as_deref(),
         Some(&b"replacement"[..])
     );
     Ok(())
